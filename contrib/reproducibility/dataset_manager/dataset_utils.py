@@ -21,6 +21,7 @@ try:
 except ImportError:
     gdal_installed = False
 
+
 class DownloadUtils:
     """Shared download utilities for all datasets"""
 
@@ -78,7 +79,6 @@ class DownloadUtils:
     ) -> bool:
         """Download a single file from Kaggle"""
         try:
-
             dataset_dir = os.path.join(output_path, kaggle_slug.split("/")[-1])
             api = KaggleApi()
             api.authenticate()
@@ -108,7 +108,6 @@ class DownloadUtils:
                 return False
             print(f"Unexpected error: {e}")
             return False
-
 
     @staticmethod
     def download_file_from_url(
@@ -172,7 +171,6 @@ class DownloadUtils:
         # Make sure directory exists
         os.makedirs(output_dir, exist_ok=True)
         for ind, url in enumerate(file_urls):
-
             # Extract filename from URL and create output path
             parsed_url = urlparse(url)
             alt_file_name = (
@@ -226,7 +224,6 @@ class DownloadUtils:
     def verify_parquet_canonical(
         input_dir: str, output_dir: str, binary_path: Optional[str] = None
     ) -> bool:
-
         try:
             files = os.listdir(input_dir)
             os.makedirs(output_dir, exist_ok=True)
@@ -295,9 +292,10 @@ class DownloadUtils:
                     os.path.basename(filepath).replace(".bz2", ""),
                 )
 
-                with bz2.open(filepath, "rb") as f_in, open(
-                    temp_grb_file, "wb"
-                ) as f_out:
+                with (
+                    bz2.open(filepath, "rb") as f_in,
+                    open(temp_grb_file, "wb") as f_out,
+                ):
                     f_out.write(f_in.read())
 
                 # convert to .bin

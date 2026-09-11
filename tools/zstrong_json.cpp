@@ -6,7 +6,6 @@
 #include <mutex>
 
 #include <folly/FileUtil.h>
-#include <folly/Memory.h>
 #include <folly/base64.h>
 #include <folly/lang/Bits.h>
 
@@ -139,9 +138,10 @@ ZL_GraphID JsonGraph::registerGraph(
             int const k = (int)key.asInt();
             genericParamsStorage.push_back(folly::base64Decode(val.asString()));
             auto const& v = genericParamsStorage.back();
-            genericParams.push_back(ZL_CopyParam{ .paramId   = k,
-                                                  .paramPtr  = v.data(),
-                                                  .paramSize = v.size() });
+            genericParams.push_back(
+                    ZL_CopyParam{ .paramId   = k,
+                                  .paramPtr  = v.data(),
+                                  .paramSize = v.size() });
         }
     }
     if (graph.count(kGenericStringParamsKey)) {
@@ -150,9 +150,10 @@ ZL_GraphID JsonGraph::registerGraph(
             int const k = (int)key.asInt();
             genericParamsStorage.push_back(val.asString());
             auto const& v = genericParamsStorage.back();
-            genericParams.push_back(ZL_CopyParam{ .paramId   = k,
-                                                  .paramPtr  = v.data(),
-                                                  .paramSize = v.size() });
+            genericParams.push_back(
+                    ZL_CopyParam{ .paramId   = k,
+                                  .paramPtr  = v.data(),
+                                  .paramSize = v.size() });
         }
     }
 
@@ -212,8 +213,9 @@ std::vector<ExtractedStream> splitExtractedStreams(std::string_view data)
         if (data.size() < length) {
             throw std::runtime_error("Not enough bytes in data");
         }
-        streams.push_back(ExtractedStream{
-                type, nbElts, eltWidth, data.substr(0, length) });
+        streams.push_back(
+                ExtractedStream{
+                        type, nbElts, eltWidth, data.substr(0, length) });
         data = data.substr(length);
     }
     return streams;

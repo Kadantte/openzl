@@ -5,6 +5,7 @@
 #include "openzl/zl_compressor.h"
 #include "openzl/zl_compressor_serialization.h"
 #include "openzl/zl_ctransform.h"
+#include "openzl/zl_reflection.h"
 
 #include "openzl/cpp/CustomEncoder.hpp"
 #include "openzl/cpp/FunctionGraph.hpp"
@@ -34,6 +35,44 @@ CompressorDeserializerPtr make_deserializer()
     return deserializer;
 }
 } // anonymous namespace
+
+ZL_StaticGraphParameters StaticGraphParameters::toC() const
+{
+    ZL_StaticGraphParameters cParams = {};
+    if (name.has_value()) {
+        cParams.name = name->c_str();
+    }
+    if (localParams.has_value()) {
+        cParams.localParams = localParams->get();
+    }
+    return cParams;
+}
+
+ZL_NodeParameters NodeParameters::toC() const
+{
+    ZL_NodeParameters cParams = {
+        .name        = name.has_value() ? name->c_str() : nullptr,
+        .localParams = localParams.has_value() ? localParams->get() : nullptr,
+    };
+    return cParams;
+}
+
+ZL_GraphParameters GraphParameters::toC() const
+{
+    ZL_GraphParameters cParams = {
+        .name        = name.has_value() ? name->c_str() : nullptr,
+        .localParams = localParams.has_value() ? localParams->get() : nullptr,
+    };
+    if (customGraphs.has_value()) {
+        cParams.customGraphs   = customGraphs->data();
+        cParams.nbCustomGraphs = customGraphs->size();
+    }
+    if (customNodes.has_value()) {
+        cParams.customNodes   = customNodes->data();
+        cParams.nbCustomNodes = customNodes->size();
+    }
+    return cParams;
+}
 
 Compressor::Compressor()
         : Compressor(ZL_Compressor_create(), ZL_Compressor_free)
@@ -75,20 +114,7 @@ GraphID Compressor::parameterizeGraph(
         GraphID graph,
         const GraphParameters& params)
 {
-    ZL_GraphParameters cParams = {
-        .name        = params.name.has_value() ? params.name->c_str() : nullptr,
-        .localParams = params.localParams.has_value()
-                ? params.localParams->get()
-                : nullptr,
-    };
-    if (params.customGraphs.has_value()) {
-        cParams.customGraphs   = params.customGraphs->data();
-        cParams.nbCustomGraphs = params.customGraphs->size();
-    }
-    if (params.customNodes.has_value()) {
-        cParams.customNodes   = params.customNodes->data();
-        cParams.nbCustomNodes = params.customNodes->size();
-    }
+    const ZL_GraphParameters cParams = params.toC();
     return unwrap(ZL_Compressor_parameterizeGraph(get(), graph, &cParams));
 }
 
@@ -104,12 +130,7 @@ GraphID Compressor::registerSelectorGraph(std::shared_ptr<Selector> selector)
 
 NodeID Compressor::parameterizeNode(NodeID node, const NodeParameters& params)
 {
-    ZL_NodeParameters cParams = {
-        .name        = params.name.has_value() ? params.name->c_str() : nullptr,
-        .localParams = params.localParams.has_value()
-                ? params.localParams->get()
-                : nullptr,
-    };
+    const ZL_NodeParameters cParams = params.toC();
     return unwrap(ZL_Compressor_parameterizeNode(get(), node, &cParams));
 }
 
@@ -120,12 +141,7 @@ GraphID Compressor::buildStaticGraph(
 {
     ZL_StaticGraphParameters cParams = {};
     if (params.has_value()) {
-        if (params->name.has_value()) {
-            cParams.name = params->name->c_str();
-        }
-        if (params->localParams.has_value()) {
-            cParams.localParams = params->localParams->get();
-        }
+        cParams = params->toC();
     }
     return unwrap(ZL_Compressor_buildStaticGraph(
             get(),
@@ -162,6 +178,13 @@ poly::optional<GraphID> Compressor::getGraph(const char* name) const
 void Compressor::selectStartingGraph(GraphID graph)
 {
     unwrap(ZL_Compressor_selectStartingGraphID(get(), graph));
+}
+
+GraphID Compressor::getStartingGraph() const
+{
+    GraphID gid;
+    ZL_Compressor_getStartingGraphID(get(), &gid);
+    return gid;
 }
 
 std::string Compressor::serialize() const
@@ -207,7 +230,9 @@ std::string Compressor::serializeToJson() const
     return json;
 }
 
-void Compressor::deserialize(poly::string_view serialized)
+void Compressor::deserialize(
+        poly::string_view serialized,
+        poly::string_view fatBundle)
 {
     const auto deserializer = make_deserializer();
 
@@ -216,7 +241,9 @@ void Compressor::deserialize(poly::string_view serialized)
                     deserializer.get(),
                     get(),
                     serialized.data(),
-                    serialized.size()),
+                    serialized.size(),
+                    fatBundle.empty() ? nullptr : fatBundle.data(),
+                    fatBundle.size()),
             "Call to ZL_CompressorDeserializer_deserialize() failed.",
             deserializer.get());
 }
@@ -241,6 +268,9 @@ Compressor::UnmetDependencies Compressor::getUnmetDependencies(
     }
     for (size_t i = 0; i < raw_deps.num_nodes; i++) {
         deps.nodeNames.emplace_back(raw_deps.node_names[i]);
+    }
+    if (ZL_UniqueID_isValid(&raw_deps.bundle_id.id)) {
+        deps.bundleID = raw_deps.bundle_id;
     }
     return deps;
 }

@@ -1,5 +1,8 @@
 // Copyright (c) Meta Platforms, Inc. and affiliates.
 
+#include <cstdint>
+#include <cstring>
+
 #include <gtest/gtest.h>
 
 #include "openzl/common/stream.h"
@@ -29,7 +32,30 @@ TEST(Stream, intMetadata)
     // test what happens when requesting a non-present metadata id
     ASSERT_EQ(ZL_Data_getIntMetadata(s, 3).isPresent, 0);
 
+    ASSERT_EQ(STREAM_numIntMetadata(s), 2u);
+    Stream_IntMetadata metadata[2];
+    ASSERT_ZS_VALID(STREAM_copyIntMetadata(metadata, s, 2));
+    EXPECT_EQ(metadata[0].id, 1);
+    EXPECT_EQ(metadata[0].value, 1001);
+    EXPECT_EQ(metadata[1].id, 2);
+    EXPECT_EQ(metadata[1].value, 2002);
+
+    const Stream_IntMetadata sentinel = { 7, 7007 };
+    Stream_IntMetadata rejected       = sentinel;
+    EXPECT_TRUE(ZL_isError(STREAM_copyIntMetadata(&rejected, s, 1)));
+    EXPECT_EQ(rejected.id, sentinel.id);
+    EXPECT_EQ(rejected.value, sentinel.value);
+    EXPECT_TRUE(ZL_isError(STREAM_copyIntMetadata(&rejected, s, 3)));
+    EXPECT_EQ(rejected.id, sentinel.id);
+    EXPECT_EQ(rejected.value, sentinel.value);
+    EXPECT_TRUE(ZL_isError(STREAM_copyIntMetadata(nullptr, s, 2)));
+
     STREAM_free(s);
+
+    ZL_Data* const empty = STREAM_create(kZeroID);
+    ASSERT_NE(empty, nullptr);
+    EXPECT_ZS_VALID(STREAM_copyIntMetadata(nullptr, empty, 0));
+    STREAM_free(empty);
 }
 
 // check byteSize function
@@ -148,6 +174,55 @@ TEST(Stream, refStream)
     STREAM_free(ref);
 }
 
+TEST(Stream, codecCacheKeyHashTracksImmutableContent)
+{
+    ZL_Data* const stream = STREAM_create(kZeroID);
+    ASSERT_NE(stream, nullptr);
+    ZL_REQUIRE_SUCCESS(STREAM_reserve(stream, ZL_Type_numeric, 2, 3));
+    std::memset(ZL_Data_wPtr(stream), 0, 6);
+    ZL_REQUIRE_SUCCESS(ZL_Data_commit(stream, 3));
+
+    uint64_t hash = 0;
+    EXPECT_FALSE(STREAM_getCodecCacheKeyHash(stream, &hash));
+    STREAM_setCodecCacheKeyHash(stream, 11);
+    ASSERT_TRUE(STREAM_getCodecCacheKeyHash(stream, &hash));
+    EXPECT_EQ(hash, 11);
+
+    ZL_Data* const fullRef = STREAM_create(kOneID);
+    ASSERT_NE(fullRef, nullptr);
+    STREAM_setCodecCacheKeyHash(fullRef, 22);
+    ASSERT_TRUE(STREAM_getCodecCacheKeyHash(fullRef, &hash));
+    EXPECT_EQ(hash, 22);
+    ZL_REQUIRE_SUCCESS(STREAM_refStreamWithoutRefCount(fullRef, stream));
+    ASSERT_TRUE(STREAM_getCodecCacheKeyHash(fullRef, &hash));
+    EXPECT_EQ(hash, 11);
+
+    ZL_Data* const slice = STREAM_create(kOneID);
+    ASSERT_NE(slice, nullptr);
+    STREAM_setCodecCacheKeyHash(slice, 33);
+    ASSERT_TRUE(STREAM_getCodecCacheKeyHash(slice, &hash));
+    EXPECT_EQ(hash, 33);
+    ZL_REQUIRE_SUCCESS(
+            STREAM_refStreamSliceWithoutRefCount(slice, stream, 1, 2));
+    EXPECT_FALSE(STREAM_getCodecCacheKeyHash(slice, &hash));
+
+    ZL_REQUIRE_SUCCESS(ZL_Data_setIntMetadata(stream, 1, 7));
+    EXPECT_FALSE(STREAM_getCodecCacheKeyHash(stream, &hash));
+    STREAM_setCodecCacheKeyHash(stream, 11);
+    ASSERT_NE(ZL_Data_wPtr(stream), nullptr);
+    EXPECT_FALSE(STREAM_getCodecCacheKeyHash(stream, &hash));
+    STREAM_setCodecCacheKeyHash(stream, 11);
+    ZL_REQUIRE_SUCCESS(STREAM_consume(stream, 1));
+    EXPECT_FALSE(STREAM_getCodecCacheKeyHash(stream, &hash));
+    STREAM_setCodecCacheKeyHash(stream, 11);
+    STREAM_clear(stream);
+    EXPECT_FALSE(STREAM_getCodecCacheKeyHash(stream, &hash));
+
+    STREAM_free(slice);
+    STREAM_free(fullRef);
+    STREAM_free(stream);
+}
+
 TEST(Stream, copyIntMetas)
 {
     // Create source stream with int metadata
@@ -183,6 +258,24 @@ TEST(Stream, copyIntMetas)
 
     STREAM_free(src);
     STREAM_free(dst);
+}
+
+// Test for size overflow
+TEST(Stream, ReserveStringsOverflow)
+{
+    ZL_Data* const s = STREAM_create(kZeroID);
+    ASSERT_NE(s, nullptr);
+
+    // Test with a value that would cause nbStrings * sizeof(uint32_t) to
+    // overflow SIZE_MAX / 4 + 1 will overflow when multiplied by 4
+    size_t const overflowCount = (SIZE_MAX / sizeof(uint32_t)) + 1;
+    ZL_Report r                = STREAM_reserveStrings(s, overflowCount, 1000);
+
+    // Should return an error, not success
+    ASSERT_TRUE(ZL_isError(r));
+    ASSERT_EQ(ZL_errorCode(r), ZL_ErrorCode_allocation);
+
+    STREAM_free(s);
 }
 
 } // namespace

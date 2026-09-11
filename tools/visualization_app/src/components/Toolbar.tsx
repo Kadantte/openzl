@@ -2,11 +2,16 @@
 
 import '../styles/toolbar.css';
 import {Legend} from './Legend';
+import {SettingsPanel} from './Settings';
 import logoUrl from '/OpenZL_logo.png?url';
 import {Box, Flex, HStack, VStack, Heading} from '@chakra-ui/react';
 
 interface ToolbarProps {
   onUploadCborFile: () => void;
+  onToggleTrackpadMode: () => void;
+  onToggleKeyboardNav: () => void;
+  isTrackpadMode: boolean;
+  isKeyboardMode: boolean;
 }
 
 interface Props {
@@ -17,7 +22,7 @@ interface Props {
 
 const Links = [
   {name: 'HOME', link: '/#'},
-  {name: 'API REFERENCE', link: '/api/compressor'},
+  {name: 'API REFERENCE', link: '/api/c/compressor/'},
   {
     name: 'GETTING STARTED',
     link: '/getting-started/quick-start/',
@@ -50,7 +55,15 @@ const Toolbar: React.FC<ToolbarProps> = (props: ToolbarProps) => {
               Trace Visualization
             </Heading>
           </HStack>
-          <Legend />
+          <HStack gap={0} className="toolbar-icons">
+            <SettingsPanel
+              onToggleTrackpadMode={props.onToggleTrackpadMode}
+              onToggleKeyboardNav={props.onToggleKeyboardNav}
+              isTrackpadMode={props.isTrackpadMode}
+              isKeyboardMode={props.isKeyboardMode}
+            />
+            <Legend />
+          </HStack>
         </Flex>
         <Flex h={10} alignItems={'center'} justifyContent={'space-between'}>
           <HStack as={'nav'} gap={4} display={{base: 'none', md: 'flex'}}>

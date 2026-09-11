@@ -183,6 +183,11 @@ RTStreamID RTGM_getOutStreamID(const RTGraph* rtnm, RTNodeID rtnid, int outIdx);
 // To be used _ONLY_ in specific circumstances
 void RTGM_clearNodesFrom(RTGraph* rtgraph, unsigned nodeRank);
 
+// Remove all streams created after that rank id
+// WARNING ! Very dangerous operation (stateful)
+// To be used _ONLY_ in specific circumstances
+void RTGM_clearRTStreamsFrom(RTGraph* rtgraph, unsigned rank);
+
 /* =====   Methods associated to RTStreams   ===== */
 
 // RTGM_refInput() :
@@ -235,6 +240,19 @@ RTGM_refContentIntoNewStream(
         size_t eltCount,
         const ZL_Data* ref,
         size_t offsetBytes);
+
+/** Create a runtime output stream that references an immutable external buffer.
+ */
+ZL_RESULT_OF(RTStreamID)
+RTGM_refConstBufferIntoNewStream(
+        RTGraph* rtgraph,
+        RTNodeID rtnodeid,
+        int outcomeID,
+        int isVO,
+        ZL_Type streamtype,
+        size_t eltWidth,
+        size_t eltCount,
+        const void* ref);
 
 // RTGM_storeStream() :
 // Tag the stream to be stored into final frame at collection stage.

@@ -11,7 +11,7 @@ project(${PACKAGE_NAME} CXX C ASM)
 
 # ---- Build Options ----
 option(OPENZL_BUILD_ALL "Build all optional components" OFF)
-option(OPENZL_BUILD_SHARED_LIBS "Build as shared library" ${OPENZL_BUILD_ALL})
+option(OPENZL_BUILD_SHARED_LIBS "Build as shared library" OFF)
 option(OPENZL_BUILD_TESTS "Build tests" ${OPENZL_BUILD_ALL})
 option(OPENZL_BUILD_BENCHMARKS "Build benchmarks" ${OPENZL_BUILD_ALL})
 # Apache Arrow build is broken due to missing thrift download.
@@ -23,6 +23,7 @@ option(OPENZL_BUILD_PYTHON_EXT_TESTS "Build Python extension tests" ${OPENZL_BUI
 option(OPENZL_ALLOW_INTROSPECTION "Allow introspection" ON)
 option(OPENZL_INSTALL "Install OpenZL" ON)
 option(OPENZL_CPP_INSTALL "Install C++ bindings" ${OPENZL_INSTALL})
+option(OPENZL_BUILD_PYTHON_DEMO "Build openzl_demo Python extension" ${OPENZL_BUILD_ALL})
 
 # Fine-grained control of build directories that can be disabled.
 # NOTE: Disabling some but not all of these may break the build, use with caution.
@@ -31,26 +32,42 @@ option(OPENZL_BUILD_CUSTOM_PARSERS "Builds the custom_parsers subdirectory" ON)
 option(OPENZL_BUILD_TOOLS "Builds the tools subdirectory" ON)
 option(OPENZL_BUILD_CLI "Build the cli subdirectory" ON)
 option(OPENZL_BUILD_EXAMPLES "Build the examples subdirectory" ON)
+option(OPENZL_BUILD_WASM "Builds WASM binding (requires Emscripten)" OFF)
 
 set(OPENZL_SUPPORT_SHARED_LIBRARY "${OPENZL_BUILD_SHARED_LIBS}")
+
+# ---- Emscripten ----
+# OpenZL currently requires a 64-bit platform. 32-bit is unsupported,
+# so Emscripten builds must use wasm64.
+if(EMSCRIPTEN)
+    add_compile_options(-sMEMORY64=1)
+    add_link_options(-sMEMORY64=1 -sWASM_BIGINT=1)
+
+    # Training throws across the binding and uses std::thread, so these flags
+    # must apply to every object linked into the WASM artifact.
+    if(OPENZL_BUILD_WASM)
+        add_compile_options(-fexceptions -pthread)
+        add_link_options(-fexceptions -pthread)
+    endif()
+endif()
 
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
 # ---- CMake Module Path ----
 set(CMAKE_MODULE_PATH
-    "${CMAKE_CURRENT_SOURCE_DIR}/build/cmake"
+    "${CMAKE_CURRENT_SOURCE_DIR}/build-scripts/cmake"
     # For in-fbsource release builds
     "${CMAKE_CURRENT_SOURCE_DIR}/../../opensource/fbcode_builder/CMake"
     # For in-fbsource dev builds
     "${CMAKE_CURRENT_SOURCE_DIR}/../../../opensource/fbcode_builder/CMake"
     # For shipit-transformed builds
-    "${CMAKE_CURRENT_SOURCE_DIR}/build/fbcode_builder/CMake"
+    "${CMAKE_CURRENT_SOURCE_DIR}/build-scripts/fbcode_builder/CMake"
     ${CMAKE_MODULE_PATH})
 
 # ---- Package Information ----
 if (NOT DEFINED PACKAGE_VERSION)
     # TODO: How do we set the package version based on our headers?
-    set(PACKAGE_VERSION "0.0.0-dev")
+    set(PACKAGE_VERSION "0.2.0")
 endif()
 set(PACKAGE_STRING "${PACKAGE_NAME} ${PACKAGE_VERSION}")
 set(PACKAGE_TARNAME "${PACKAGE_NAME}-${PACKAGE_VERSION}")
@@ -133,7 +150,7 @@ include(OpenZLFunctions)
 include(openzl-deps)
 include(OpenZLConfigChecks)
 configure_file(
-    ${CMAKE_CURRENT_SOURCE_DIR}/build/cmake/zl_config.h.cmake
+    ${CMAKE_CURRENT_SOURCE_DIR}/build-scripts/cmake/zl_config.h.cmake
     ${CMAKE_CURRENT_BINARY_DIR}/include/openzl/zl_config.h
 )
 set(CONFIG "${CMAKE_CURRENT_BINARY_DIR}/include/openzl/zl_config.h")
@@ -206,6 +223,12 @@ apply_openzl_compile_options_to_target(openzl)
 
 target_link_libraries(openzl PUBLIC openzl_deps)
 
+# Keep shared profile graph builders independent of CLI dependencies for WASM.
+add_library(openzl_profile_graphs cli/utils/profile_graphs.cpp)
+target_include_directories(openzl_profile_graphs PUBLIC ${PROJECT_SOURCE_DIR})
+target_link_libraries(openzl_profile_graphs PUBLIC openzl)
+apply_openzl_compile_options_to_target(openzl_profile_graphs)
+
 # order matters. dependencies first
 if (OPENZL_BUILD_TESTS)
     set(INSTALL_GTEST OFF)
@@ -213,10 +236,8 @@ if (OPENZL_BUILD_TESTS)
         googletest # v1.14.0
         URL https://github.com/google/googletest/archive/refs/tags/v1.14.0.zip
         URL_HASH SHA256=1f357c27ca988c3f7c6b4bf68a9395005ac6761f034046e9dde0896e3aba00e4
-        OVERRIDE_FIND_PACKAGE
     )
     FetchContent_MakeAvailable(googletest)
-    find_package(googletest REQUIRED)
     include(GoogleTest)
     enable_testing()
 
@@ -250,6 +271,10 @@ endif()
 
 if (OPENZL_BUILD_BENCHMARKS)
     add_subdirectory(benchmark)
+endif()
+
+if (OPENZL_BUILD_PYTHON_DEMO)
+    add_subdirectory(contrib/openzl-demo)
 endif()
 
 if (OPENZL_INSTALL)
@@ -287,7 +312,7 @@ if (OPENZL_INSTALL)
     # files using "find_package(openzl CONFIG)"
     include(CMakePackageConfigHelpers)
     configure_package_config_file(
-        build/cmake/openzl-config.cmake.in
+        build-scripts/cmake/openzl-config.cmake.in
         openzl-config.cmake
         INSTALL_DESTINATION ${OPENZL_INSTALL_CMAKEDIR}
         PATH_VARS

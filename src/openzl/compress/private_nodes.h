@@ -61,6 +61,15 @@ extern "C" {
 // Only use in scenarios where the condition is guaranteed to be true.
 #define ZL_NODE_DEDUP_NUM_TRUSTED (ZL_NodeID){ZL_PrivateStandardNodeID_dedup_num_trusted}
 
+// bitSplit
+// Input: 1 numeric stream (all widths supported)
+// Output: N numeric streams (one per bit range specified in parameters)
+// Parameters: Array of bit widths [w₀, w₁, ..., wₙ₋₁] (LSB to MSB order)
+// Result: Splits each element by bit ranges into multiple streams
+// Note: Fully reversible. Parameters required (empty params = error).
+//       If sum(widths) < element_width, top bits must be zero.
+#define ZL_NODE_BITSPLIT (ZL_NodeID){ZL_PrivateStandardNodeID_bitSplit}
+
 // Internal node for conversion from Serial to String
 // Requires passing parameters, documented in encode_conversion_binding.h
 #define ZL_NODE_SETSTRINGLENS (ZL_NodeID){ZL_PrivateStandardNodeID_set_string_lens}
@@ -86,6 +95,12 @@ extern "C" {
 #define ZL_NODE_TRANSPOSE_SPLIT8_DEPRECATED  (ZL_NodeID){ZL_PrivateStandardNodeID_transpose_split8_deprecated}
 
 #define ZL_NODE_SPLIT_BY_STRUCT (ZL_NodeID){ZL_PrivateStandardNodeID_split_by_struct}
+
+// pivco_huffman
+// Input  : 1 serial stream
+// Outputs: 2 streams -- the numeric zstd-style Huffman weights and the serial
+//          pivco-coded bitstream (see codecs/pivco_huffman/spec.md)
+#define ZL_NODE_PIVCO_HUFFMAN ZL_MAKE_NODE_ID(ZL_PrivateStandardNodeID_pivco_huffman)
 
 #define ZL_GRAPH_FIELD_LZ_LITERALS         (ZL_GraphID){ ZL_PrivateStandardGraphID_field_lz_literals }
 #define ZL_GRAPH_FIELD_LZ_LITERALS_CHANNEL (ZL_GraphID){ ZL_PrivateStandardGraphID_field_lz_literals_channel }
@@ -129,6 +144,8 @@ typedef enum {
 
     ZL_PrivateStandardNodeID_dedup_num_trusted,
 
+    ZL_PrivateStandardNodeID_bitSplit,
+
     // Deprecated nodes that should not be used in new code.
     // We retain support for testing purposes.
 
@@ -142,6 +159,9 @@ typedef enum {
     ZL_PrivateStandardNodeID_transpose_split2_deprecated,
     ZL_PrivateStandardNodeID_transpose_split4_deprecated,
     ZL_PrivateStandardNodeID_transpose_split8_deprecated,
+
+    ZL_PrivateStandardNodeID_lz4,
+    ZL_PrivateStandardNodeID_pivco_huffman,
 
     ZL_PrivateStandardNodeID_end // last id, used to detect out-of-bound enum
                                  // values
@@ -191,6 +211,42 @@ typedef enum {
     ZL_PrivateStandardGraphID_split_struct,
     ZL_PrivateStandardGraphID_split_numeric,
     ZL_PrivateStandardGraphID_split_string,
+    ZL_PrivateStandardGraphID_sddl2_chunk,
+
+    ZL_PrivateStandardGraphID_n_to_n,
+
+    ZL_PrivateStandardGraphID_merge_sorted,
+    ZL_PrivateStandardGraphID_transpose_split,
+
+    ZL_PrivateStandardGraphID_interpret_num8_compress,
+    ZL_PrivateStandardGraphID_interpret_num16_compress,
+    ZL_PrivateStandardGraphID_interpret_num32_compress,
+    ZL_PrivateStandardGraphID_interpret_num64_compress,
+
+    ZL_PrivateStandardGraphID_compress_small_lengths,
+
+    ZL_PrivateStandardGraphID_transformer_delta_int,
+    ZL_PrivateStandardGraphID_transformer_range_pack,
+    ZL_PrivateStandardGraphID_transformer_divide_by_gcd,
+    ZL_PrivateStandardGraphID_transformer_tokenize_numeric,
+    ZL_PrivateStandardGraphID_transformer_tokenize_numeric_sorted,
+    ZL_PrivateStandardGraphID_transformer_sparse_num,
+
+    ZL_PrivateStandardGraphID_transformer_static_core,
+    ZL_PrivateStandardGraphID_transformer_static_delta,
+    ZL_PrivateStandardGraphID_transformer_static_range_pack,
+    ZL_PrivateStandardGraphID_transformer_static_range_pack_delta,
+    ZL_PrivateStandardGraphID_transformer_static_zigzag,
+    ZL_PrivateStandardGraphID_transformer_static_gcd,
+    ZL_PrivateStandardGraphID_transformer_static_index,
+    ZL_PrivateStandardGraphID_transformer_static_tok_sorted,
+    ZL_PrivateStandardGraphID_transformer_static_delta_tok,
+    ZL_PrivateStandardGraphID_transformer_static_tok_mono,
+    ZL_PrivateStandardGraphID_transformer_static_delta_tok_mono,
+    ZL_PrivateStandardGraphID_transformer_static_tok_mono_lz,
+    ZL_PrivateStandardGraphID_transformer_static_delta_tok_mono_lz,
+    ZL_PrivateStandardGraphID_transformer_static_fallback,
+    ZL_PrivateStandardGraphID_transformer_numeric1,
 
     ZL_PrivateStandardGraphID_end // last id, used to detect out-of-bound enum
                                   // values
@@ -203,6 +259,8 @@ typedef enum {
 
 #define ZL_GRAPH_COMPRESS1        (ZL_GraphID){ZL_PrivateStandardGraphID_compress1}
 #define ZL_GRAPH_SERIAL_COMPRESS  (ZL_GraphID){ZL_PrivateStandardGraphID_serial_compress}
+/* Compatibility adapter for generic compression and numeric segmenters.
+ * New numeric paths should use the public ZL_GRAPH_NUMERIC directly. */
 #define ZL_GRAPH_NUMERIC_COMPRESS (ZL_GraphID){ZL_PrivateStandardGraphID_numeric_compress}
 #define ZL_GRAPH_STRUCT_COMPRESS  (ZL_GraphID){ZL_PrivateStandardGraphID_struct_compress}
 #define ZL_GRAPH_STRING_COMPRESS  (ZL_GraphID){ZL_PrivateStandardGraphID_string_compress} // Generic Selector
@@ -217,6 +275,7 @@ typedef enum {
 
 #define ZL_GRAPH_BITPACK_SERIAL (ZL_GraphID){ZL_PrivateStandardGraphID_bitpack_serial}
 #define ZL_GRAPH_BITPACK_INT (ZL_GraphID){ZL_PrivateStandardGraphID_bitpack_int}
+#define ZL_GRAPH_SDDL2_CHUNK (ZL_GraphID){ZL_PrivateStandardGraphID_sddl2_chunk}
 
 /**
  * Create a tokenize delta field lz graph.
@@ -266,6 +325,95 @@ typedef enum {
 #define ZL_GRAPH_SPLIT_STRUCT (ZL_GraphID){ZL_PrivateStandardGraphID_split_struct}
 #define ZL_GRAPH_SPLIT_NUMERIC (ZL_GraphID){ZL_PrivateStandardGraphID_split_numeric}
 #define ZL_GRAPH_SPLIT_STRING (ZL_GraphID){ZL_PrivateStandardGraphID_split_string}
+
+#define ZL_GRAPH_N_TO_N (ZL_GraphID){ZL_PrivateStandardGraphID_n_to_n}
+
+#define ZL_GRAPH_INTERPRET_NUM8_COMPRESS  (ZL_GraphID){ZL_PrivateStandardGraphID_interpret_num8_compress}
+#define ZL_GRAPH_INTERPRET_NUM16_COMPRESS (ZL_GraphID){ZL_PrivateStandardGraphID_interpret_num16_compress}
+#define ZL_GRAPH_INTERPRET_NUM32_COMPRESS (ZL_GraphID){ZL_PrivateStandardGraphID_interpret_num32_compress}
+#define ZL_GRAPH_INTERPRET_NUM64_COMPRESS (ZL_GraphID){ZL_PrivateStandardGraphID_interpret_num64_compress}
+
+/**
+ * Specializes in compressing small lengths that are mostly < 255.
+ * For example: literal & match lengths from LZ.
+ */
+#define ZL_GRAPH_COMPRESS_SMALL_LENGTHS (ZL_GraphID){ZL_PrivateStandardGraphID_compress_small_lengths}
+
+/**
+ * This graph selects between the merge sorted transform and a backup graph
+ * based on the number of sorted runs in the input. Chooses backup graph if
+ * width is not 4.
+ *
+ * Input: A stream of width 1, 2, 4, or 8.
+ */
+#define ZL_GRAPH_MERGE_SORTED           \
+    (ZL_GraphID)                        \
+    {                                   \
+        ZL_PrivateStandardGraphID_merge_sorted \
+    }
+
+/**
+ * This graph selects between different transpose implementations based on
+ * element width.
+ *
+ * Input: A stream of width 1, 2, 4, or 8.
+ */
+#define ZL_GRAPH_TRANSPOSE_SPLIT           \
+    (ZL_GraphID)                           \
+    {                                      \
+        ZL_PrivateStandardGraphID_transpose_split \
+    }
+
+#define ZL_GRAPH_TRANSFORMER_DELTA_INT \
+    ZL_MAKE_GRAPH_ID(ZL_PrivateStandardGraphID_transformer_delta_int)
+#define ZL_GRAPH_TRANSFORMER_RANGE_PACK \
+    ZL_MAKE_GRAPH_ID(ZL_PrivateStandardGraphID_transformer_range_pack)
+#define ZL_GRAPH_TRANSFORMER_DIVIDE_BY_GCD \
+    ZL_MAKE_GRAPH_ID(ZL_PrivateStandardGraphID_transformer_divide_by_gcd)
+#define ZL_GRAPH_TRANSFORMER_TOKENIZE_NUMERIC \
+    ZL_MAKE_GRAPH_ID(ZL_PrivateStandardGraphID_transformer_tokenize_numeric)
+#define ZL_GRAPH_TRANSFORMER_TOKENIZE_NUMERIC_SORTED \
+    ZL_MAKE_GRAPH_ID( \
+            ZL_PrivateStandardGraphID_transformer_tokenize_numeric_sorted)
+#define ZL_GRAPH_TRANSFORMER_SPARSE_NUM \
+    ZL_MAKE_GRAPH_ID(ZL_PrivateStandardGraphID_transformer_sparse_num)
+
+#define ZL_GRAPH_TRANSFORMER_STATIC_CORE_SELECTOR \
+    ZL_MAKE_GRAPH_ID(ZL_PrivateStandardGraphID_transformer_static_core)
+#define ZL_GRAPH_TRANSFORMER_STATIC_DELTA \
+    ZL_MAKE_GRAPH_ID(ZL_PrivateStandardGraphID_transformer_static_delta)
+#define ZL_GRAPH_TRANSFORMER_STATIC_RANGE_PACK \
+    ZL_MAKE_GRAPH_ID(ZL_PrivateStandardGraphID_transformer_static_range_pack)
+#define ZL_GRAPH_TRANSFORMER_STATIC_RANGE_PACK_DELTA \
+    ZL_MAKE_GRAPH_ID( \
+            ZL_PrivateStandardGraphID_transformer_static_range_pack_delta)
+#define ZL_GRAPH_TRANSFORMER_STATIC_ZIGZAG \
+    ZL_MAKE_GRAPH_ID(ZL_PrivateStandardGraphID_transformer_static_zigzag)
+#define ZL_GRAPH_TRANSFORMER_STATIC_GCD \
+    ZL_MAKE_GRAPH_ID(ZL_PrivateStandardGraphID_transformer_static_gcd)
+#define ZL_GRAPH_TRANSFORMER_STATIC_INDEX_SELECTOR \
+    ZL_MAKE_GRAPH_ID(ZL_PrivateStandardGraphID_transformer_static_index)
+#define ZL_GRAPH_TRANSFORMER_STATIC_TOK_SORTED \
+    ZL_MAKE_GRAPH_ID(ZL_PrivateStandardGraphID_transformer_static_tok_sorted)
+#define ZL_GRAPH_TRANSFORMER_STATIC_DELTA_TOK \
+    ZL_MAKE_GRAPH_ID(ZL_PrivateStandardGraphID_transformer_static_delta_tok)
+#define ZL_GRAPH_TRANSFORMER_STATIC_TOK_MONO \
+    ZL_MAKE_GRAPH_ID(ZL_PrivateStandardGraphID_transformer_static_tok_mono)
+#define ZL_GRAPH_TRANSFORMER_STATIC_DELTA_TOK_MONO \
+    ZL_MAKE_GRAPH_ID( \
+            ZL_PrivateStandardGraphID_transformer_static_delta_tok_mono)
+#define ZL_GRAPH_TRANSFORMER_STATIC_TOK_MONO_LZ \
+    ZL_MAKE_GRAPH_ID(ZL_PrivateStandardGraphID_transformer_static_tok_mono_lz)
+#define ZL_GRAPH_TRANSFORMER_STATIC_DELTA_TOK_MONO_LZ \
+    ZL_MAKE_GRAPH_ID( \
+            ZL_PrivateStandardGraphID_transformer_static_delta_tok_mono_lz)
+#define ZL_GRAPH_TRANSFORMER_STATIC_FALLBACK \
+    ZL_MAKE_GRAPH_ID(ZL_PrivateStandardGraphID_transformer_static_fallback)
+
+/* Single-Input Transformer selector.
+ * ZL_GRAPH_TRANSFORMER_NUMERIC is the Multi-Input graph on top of it. */
+#define ZL_GRAPH_TRANSFORMER_NUMERIC1 \
+    ZL_MAKE_GRAPH_ID(ZL_PrivateStandardGraphID_transformer_numeric1)
 
 // clang-format on
 

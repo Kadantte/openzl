@@ -39,7 +39,7 @@ ZL_Report SCTX_initInput(ZL_Edge* outEdge, ZL_Graph* gctx, RTStreamID irtsid)
             allocation);
     ZL_ASSERT_GE(VECTOR_SIZE(gctx->streamCtxs), 1);
     ZL_IDType n = (ZL_IDType)VECTOR_SIZE(gctx->streamCtxs) - 1;
-    ZL_ASSERT_NN(sctx);
+    ZL_ASSERT_NN(outEdge);
     outEdge[0] = (ZL_Edge){
         .gctx     = gctx,
         .scHandle = n,
@@ -104,6 +104,18 @@ ZL_RefParam ZL_Graph_getLocalRefParam(const ZL_Graph* gctx, int refParamId)
     return LP_getLocalRefParam(&gctx->dgd->localParams, refParamId);
 }
 
+const ZL_LocalParams* ZL_Graph_getLocalParams(const ZL_Graph* gctx)
+{
+    ZL_ASSERT_NN(gctx);
+    return &gctx->dgd->localParams;
+}
+
+const void* ZL_Graph_getMParam(const ZL_Graph* gctx)
+{
+    ZL_ASSERT_NN(gctx);
+    return CGRAPH_getGraphMParamObj(CCTX_getCGraph(gctx->cctx), gctx->graphid);
+}
+
 const ZL_LocalParams* GCTX_getAllLocalParams(const ZL_Graph* gctx)
 {
     ZL_ASSERT_NN(gctx);
@@ -126,7 +138,7 @@ bool ZL_Graph_isNodeSupported(const ZL_Graph* gctx, ZL_NodeID nodeid)
 
 void* ZL_Graph_getScratchSpace(ZL_Graph* gctx, size_t size)
 {
-    WAYPOINT(on_ZL_Graph_getScratchSpace, gctx, size);
+    CWAYPOINT(on_ZL_Graph_getScratchSpace, gctx, size);
     return ALLOC_Arena_malloc(gctx->graphArena, size);
 }
 
@@ -155,13 +167,14 @@ ZL_Edge_runMultiInputNode_withParams(
     ZL_ASSERT_GE(nbInputs, 1);
     ZL_ASSERT_NN(inputCtxs);
     ZL_ASSERT_NN(inputCtxs[0]);
+    ZL_RESULT_DECLARE_SCOPE(ZL_EdgeList, inputCtxs[0]);
     ZL_Graph* const gctx = inputCtxs[0]->gctx;
     ZL_ASSERT_NN(gctx);
     Arena* const allocator = gctx->graphArena;
     ZL_ASSERT_NN(allocator);
 
 #define ALLOC_ARRAY(type, name, nb) \
-    ALLOC_ARENA_MALLOC_CHECKED_T(type, name, nb, allocator, ZL_EdgeList)
+    ALLOC_ARENA_MALLOC_CHECKED(type, name, nb, allocator)
 
     // Check input doesn't already have a set successor
     ALLOC_ARRAY(DG_StreamCtx*, inDGSCtxs, nbInputs);
@@ -171,11 +184,8 @@ ZL_Edge_runMultiInputNode_withParams(
     for (size_t n = 0; n < nbInputs; n++) {
         ZL_ASSERT_NN(inputCtxs[n]);
         inDGSCtxs[n] = &VECTOR_AT(gctx->streamCtxs, inputCtxs[n]->scHandle);
-        ZL_RET_T_IF_NE(
-                ZL_EdgeList,
-                successor_alreadySet,
-                inDGSCtxs[n]->dest_set,
-                sds_unassigned);
+        ZL_ERR_IF_NE(
+                inDGSCtxs[n]->dest_set, sds_unassigned, successor_alreadySet);
         inStreams[n] = ZL_codemodInputAsData(ZL_Edge_getData(inputCtxs[n]));
         rtsids[n]    = inDGSCtxs[n]->rtsid;
     }
@@ -187,7 +197,7 @@ ZL_Edge_runMultiInputNode_withParams(
             cctx, &rtnid, inStreams, rtsids, nbInputs, nodeid, localParams);
 
     // check node execution status
-    ZL_RET_T_IF_ERR(ZL_EdgeList, trStatus);
+    ZL_ERR_IF_ERR(trStatus);
     size_t const nbOuts = ZL_validResult(trStatus);
 
     // Set Input Streams as processed
@@ -202,7 +212,7 @@ ZL_Edge_runMultiInputNode_withParams(
     size_t const newNbStreams = oldNbStreams + nbOuts;
     size_t const reservedSize =
             VECTOR_RESIZE_UNINITIALIZED(gctx->streamCtxs, newNbStreams);
-    ZL_RET_T_IF_GT(ZL_EdgeList, allocation, newNbStreams, reservedSize);
+    ZL_ERR_IF_GT(newNbStreams, reservedSize, allocation);
 
     ZL_DLOG(SEQ, "node %u created %zu outputs", nodeid.nid, nbOuts);
     for (size_t n = 0; n < nbOuts; n++) {
@@ -274,12 +284,13 @@ static ZL_Report ZL_transferRuntimeGraphParams_stage2(
         Arena* arena,
         ZL_RuntimeGraphParameters* rgp)
 {
+    ZL_RESULT_DECLARE_SCOPE_REPORT(NULL); // T258630070
     ZL_ASSERT_NN(arena);
     ZL_ASSERT_NN(rgp);
     if (rgp->localParams) {
         ALLOC_ARENA_MALLOC_CHECKED(ZL_LocalParams, lparamsCopy, 1, arena);
         *lparamsCopy = *rgp->localParams;
-        ZL_RET_R_IF_ERR(LP_transferLocalParams(arena, lparamsCopy));
+        ZL_ERR_IF_ERR(LP_transferLocalParams(arena, lparamsCopy));
         rgp->localParams = lparamsCopy;
     }
     if (rgp->nbCustomGraphs > 0) {
@@ -341,6 +352,7 @@ ZL_Report ZL_Edge_setParameterizedDestination(
     ZL_Graph* const gctx = inputs[0]->gctx;
     ZL_ASSERT_NN(gctx);
     ZL_RESULT_DECLARE_SCOPE_REPORT(gctx->cctx);
+    ZL_DLOG(SEQ, "ZL_Edge_setDestination(%zu inputs => gid=%u)", nbInputs, gid);
 
     // === Phase 1: Basic Input Sanitization ===
     ZL_ERR_IF_NULL(
@@ -450,6 +462,13 @@ const void* ZL_Graph_getOpaquePtr(const ZL_Graph* gctx)
     return gctx->dgd->opaque.ptr;
 }
 
+unsigned ZL_Graph_getDepth(const ZL_Graph* gctx)
+{
+    ZL_ASSERT_NN(gctx);
+    ZL_ASSERT_GE(gctx->depth, 1);
+    return gctx->depth;
+}
+
 ZL_RESULT_OF(ZL_GraphPerformance)
 ZL_Graph_tryMultiInputGraph(
         const ZL_Graph* gctx,
@@ -473,4 +492,18 @@ ZL_Graph_tryGraph(
         const ZL_RuntimeGraphParameters* params)
 {
     return ZL_Graph_tryMultiInputGraph(gctx, &input, 1, graphID, params);
+}
+
+const char* ZL_Graph_getErrorContextString(
+        const ZL_Graph* graph,
+        ZL_Report report)
+{
+    return ZL_CCtx_getErrorContextString(graph->cctx, report);
+}
+
+const char* ZL_Graph_getErrorContextString_fromError(
+        const ZL_Graph* graph,
+        ZL_Error error)
+{
+    return ZL_CCtx_getErrorContextString_fromError(graph->cctx, error);
 }

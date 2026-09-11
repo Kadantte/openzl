@@ -19,6 +19,7 @@
 #include "openzl/zl_data.h"     // ZL_Data
 #include "openzl/zl_input.h"
 #include "openzl/zl_localParams.h"  // ZL_LocalParams
+#include "openzl/zl_materializer.h" // ZL_MaterializerDesc
 #include "openzl/zl_opaque_types.h" // ZL_GraphID, ZL_Selector
 #include "openzl/zl_portability.h"  // ZL_NOEXCEPT_FUNC_PTR
 
@@ -234,6 +235,19 @@ ZL_Type ZL_Selector_getInput0MaskForGraph(
 
 const void* ZL_Selector_getOpaquePtr(const ZL_Selector* selector);
 
+/**
+ * @brief Query the current graph execution depth.
+ *
+ * Returns the depth at which the current graph is executing.
+ * Depth 1 is the root graph; each successor level increments by 1.
+ * This can be used by a selector/transformer to detect runaway
+ * graph growth.
+ *
+ * @param selCtx  Selector context, must be non-NULL.
+ * @return Current graph execution depth (>= 1).
+ */
+unsigned ZL_Selector_getGraphDepth(const ZL_Selector* selCtx);
+
 /* =======================================================
  * tryGraph:
  * =======================================================
@@ -292,6 +306,13 @@ ZL_Report ZL_Selector_setSuccessorParams(
  * Note: ZL_CParam is defined within zs2_compress.h
  */
 int ZL_Selector_getCParam(const ZL_Selector* selCtx, ZL_CParam gparam);
+
+/**
+ * Determines whether @p nodeid is supported given the applied global
+ * compression parameters. Notably, `ZL_CParam_formatVersion` determines
+ * whether a node is valid for the selected encoding version.
+ */
+bool ZL_Selector_isNodeSupported(const ZL_Selector* selCtx, ZL_NodeID nodeid);
 
 /* Targeted consultation request of one Local Int parameter.
  * Retrieves the parameter of requested @paramId.

@@ -3,38 +3,22 @@
 #pragma once
 
 #include <memory>
-#include <stdexcept>
 #include <string>
+
+#include "cli/utils/parse.h"
 
 #include "openzl/cpp/CCtx.hpp"
 #include "openzl/cpp/Compressor.hpp"
 #include "openzl/cpp/DCtx.hpp"
 #include "openzl/cpp/Exception.hpp"
 
-#include "cli/utils/compress_profiles.h"
 #include "tools/logger/Logger.h"
 
 namespace openzl::cli {
+class ProfileArgs;
+} // namespace openzl::cli
 
-/**
- * Exception thrown when an invalid argument is provided.
- */
-class InvalidArgsException : public std::runtime_error {
-   public:
-    explicit InvalidArgsException(const std::string& msg)
-            : std::runtime_error(msg)
-    {
-    }
-};
-
-/**
- * A general uncategorized exception thrown when the CLI is used incorrectly.
- */
-class CLIException : public std::runtime_error {
-   public:
-    explicit CLIException(const std::string& msg) : std::runtime_error(msg) {}
-};
-
+namespace openzl::cli {
 namespace util {
 struct CompressorSerializerDeleter {
     void operator()(ZL_CompressorSerializer* serializer) const
@@ -44,8 +28,6 @@ struct CompressorSerializerDeleter {
 };
 
 void setVerbosity(int level);
-
-std::string sizeString(size_t sz);
 
 /**
  * Creates a compressor based on the provided profile.

@@ -1,5 +1,6 @@
 // Copyright (c) Meta Platforms, Inc. and affiliates.
 
+#include <iostream>
 #include <string>
 
 #include "cli/args/BenchmarkArgs.h"
@@ -40,6 +41,7 @@ int impl(int argc, char** argv)
 
     // set command-line arguments
     GlobalArgs::addArgs(argParser);
+    ProfileArgs::addArgs(argParser);
     CompressArgs::addArgs(argParser);
     DecompressArgs::addArgs(argParser);
     TrainArgs::addArgs(argParser);
@@ -47,12 +49,28 @@ int impl(int argc, char** argv)
     InspectArgs::addArgs(argParser);
     ListProfilesArgs::addArgs(argParser);
 
+    // version string
+    char version[32] = {};
+    snprintf(
+            version,
+            31,
+            "%d.%d.%d",
+            ZL_LIBRARY_VERSION_MAJOR,
+            ZL_LIBRARY_VERSION_MINOR,
+            ZL_LIBRARY_VERSION_PATCH);
+    const std::string versionLine =
+            "Demo CLI for OpenZL. Version " + std::string(version);
+
     auto usage = [&](const Cmd& cmd) -> std::string {
         auto help = cmd == Cmd::UNSPECIFIED ? argParser.help()
                                             : argParser.help(cmd);
-        return "Demo CLI for OpenZL. NO VERSION STABILITY IS IMPLIED!!\n"
+
+        return versionLine +
+                "\nNO VERSION STABILITY IS IMPLIED!!\n"
                 "\n"
                 "Usage: " + std::string(argv[0]) + " <command> [options] <args>\n"
+                "\n"
+                "Options can be specified with or without = sign. For example: --profile=u32 or --profile u32\n"
                 "\n" +
                 std::move(help) + "<<<< NO VERSION STABILITY IS IMPLIED!! >>>>";
     };
@@ -74,7 +92,7 @@ int impl(int argc, char** argv)
                 return 0;
             }
             case GlobalImmediate::VERSION: {
-                Logger::log(INFO, "zstrong-cli version 0.1");
+                std::cout << versionLine << std::endl;
                 return 0;
             }
         }

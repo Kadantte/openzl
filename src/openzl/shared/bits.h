@@ -12,6 +12,14 @@
 #include "openzl/common/debug.h"
 #include "openzl/shared/portability.h"
 
+#if ZL_HAS_BMI2
+#    include <immintrin.h>
+#endif
+
+#if ZL_HAS_SVE2_BITPERM
+#    include <arm_sve.h>
+#endif
+
 ZL_BEGIN_C_DECLS
 
 ZL_INLINE bool ZL_32bits(void)
@@ -481,6 +489,108 @@ ZL_INLINE bool ZL_convertIntToDouble(ZL_IEEEDouble* dbl, int64_t value)
 }
 
 #endif
+
+// ---------------------------------------------------------------------------
+// bitDeposit: scatter contiguous source bits into positions given by mask
+// (PDEP)
+// ---------------------------------------------------------------------------
+
+ZL_INLINE uint64_t ZL_bitDeposit64_fallback(uint64_t src, uint64_t mask)
+{
+    uint64_t result = 0;
+    uint64_t srcBit = 1;
+    while (mask != 0) {
+        uint64_t const lowestBit = mask & (~mask + 1);
+        if (src & srcBit) {
+            result |= lowestBit;
+        }
+        mask &= ~lowestBit;
+        srcBit <<= 1;
+    }
+    return result;
+}
+
+ZL_INLINE uint64_t ZL_bitDeposit64(uint64_t src, uint64_t mask)
+{
+#if ZL_HAS_BMI2
+    return _pdep_u64(src, mask);
+#elif ZL_HAS_SVE2_BITPERM
+    // This is not as terse as the BMI2 instruction because SVE2 BDEP is a
+    // vector instruction
+    return svlastb_u64(
+            svptrue_b64(), svbdep_u64(svdup_n_u64(src), svdup_n_u64(mask)));
+#else
+    return ZL_bitDeposit64_fallback(src, mask);
+#endif
+}
+
+ZL_INLINE uint32_t ZL_bitDeposit32_fallback(uint32_t src, uint32_t mask)
+{
+    return (uint32_t)ZL_bitDeposit64_fallback((uint64_t)src, (uint64_t)mask);
+}
+
+ZL_INLINE uint32_t ZL_bitDeposit32(uint32_t src, uint32_t mask)
+{
+#if ZL_HAS_BMI2
+    return _pdep_u32(src, mask);
+#elif ZL_HAS_SVE2_BITPERM
+    return (uint32_t)svlastb_u32(
+            svptrue_b32(), svbdep_u32(svdup_n_u32(src), svdup_n_u32(mask)));
+#else
+    return ZL_bitDeposit32_fallback(src, mask);
+#endif
+}
+
+// ---------------------------------------------------------------------------
+// bitExtract: collect bits from positions given by mask into contiguous result
+// (PEXT)
+// ---------------------------------------------------------------------------
+
+ZL_INLINE uint64_t ZL_bitExtract64_fallback(uint64_t src, uint64_t mask)
+{
+    uint64_t result = 0;
+    uint64_t dstBit = 1;
+    while (mask != 0) {
+        uint64_t const lowestBit = mask & (~mask + 1);
+        if (src & lowestBit) {
+            result |= dstBit;
+        }
+        mask &= ~lowestBit;
+        dstBit <<= 1;
+    }
+    return result;
+}
+
+ZL_INLINE uint64_t ZL_bitExtract64(uint64_t src, uint64_t mask)
+{
+#if ZL_HAS_BMI2
+    return _pext_u64(src, mask);
+#elif ZL_HAS_SVE2_BITPERM
+    // This is not as terse as the BMI2 instruction because SVE2 BEXT is a
+    // vector instruction
+    return svlastb_u64(
+            svptrue_b64(), svbext_u64(svdup_n_u64(src), svdup_n_u64(mask)));
+#else
+    return ZL_bitExtract64_fallback(src, mask);
+#endif
+}
+
+ZL_INLINE uint32_t ZL_bitExtract32_fallback(uint32_t src, uint32_t mask)
+{
+    return (uint32_t)ZL_bitExtract64_fallback((uint64_t)src, (uint64_t)mask);
+}
+
+ZL_INLINE uint32_t ZL_bitExtract32(uint32_t src, uint32_t mask)
+{
+#if ZL_HAS_BMI2
+    return _pext_u32(src, mask);
+#elif ZL_HAS_SVE2_BITPERM
+    return svlastb_u32(
+            svptrue_b32(), svbext_u32(svdup_n_u32(src), svdup_n_u32(mask)));
+#else
+    return ZL_bitExtract32_fallback(src, mask);
+#endif
+}
 
 ZL_END_C_DECLS
 

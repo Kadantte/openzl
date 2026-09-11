@@ -4,7 +4,6 @@
 
 #include <gtest/gtest.h>
 
-#include "openzl/common/scope_context.h"
 #include "openzl/common/wire_format.h"
 #include "openzl/compress/private_nodes.h"
 #include "openzl/zl_compress.h"
@@ -16,7 +15,7 @@
 #include "tests/utils.h"
 #include "tests/zstrong/test_zstrong_fixture.h"
 
-namespace zstrong::tests {
+namespace openzl::tests {
 namespace {
 class FormatVersionTest : public ZStrongTest {
    public:
@@ -110,15 +109,6 @@ TEST_F(FormatVersionTest, MinFormatVersionNotAccidentallyIncreased)
             << "to fix this test";
 }
 
-static ZL_NodeID nodeWithNewerTransform(ZL_Compressor* cgraph)
-{
-    const auto node = ZL_NODE_MERGE_SORTED;
-    ZL_REQUIRE_GT(
-            ZL_Compressor_Node_getMinVersion(cgraph, node),
-            ZL_MIN_FORMAT_VERSION);
-    return node;
-}
-
 TEST_F(FormatVersionTest, MaxFormatVersionSucceedsOnSupportedVersion)
 {
     reset();
@@ -150,4 +140,4 @@ TEST_F(FormatVersionTest, MaxFormatVersionWorksFailsCompression)
 }
 
 } // namespace
-} // namespace zstrong::tests
+} // namespace openzl::tests

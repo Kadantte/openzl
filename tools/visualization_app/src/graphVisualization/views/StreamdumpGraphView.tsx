@@ -1,15 +1,25 @@
 // Copyright (c) Meta Platforms, Inc. and affiliates.
 
-import {useState, useEffect} from 'react';
-import {ReactFlow, Controls, Background, ConnectionLineType, Panel, useReactFlow} from '@xyflow/react';
+import {useEffect, useState} from 'react';
+import {ReactFlow, Controls, Background, ConnectionLineType, Panel} from '@xyflow/react';
 import type {Node, Edge, NodeChange, EdgeChange} from '@xyflow/react';
 import '@xyflow/react/dist/style.css';
 import {nodeTypes} from './NodeView';
 import {Box} from '@chakra-ui/react/box';
 import {Button} from '@chakra-ui/react/button';
-import {HStack} from '@chakra-ui/react/stack';
+import {Flex} from '@chakra-ui/react/flex';
+
+import {OperationType} from '../../models/idTypes';
+import type {KeyboardNavControls} from '../controllers/useKeyboardShortcuts';
 
 const showExpansionButton = false;
+
+interface VersionInfo {
+  libraryVersion: number;
+  frameVersion: number;
+  traceVersion: number;
+  operationType: OperationType;
+}
 
 interface StreamdumpGraphViewProps {
   nodes: Node[];
@@ -18,6 +28,10 @@ interface StreamdumpGraphViewProps {
   onEdgesChange: (changes: EdgeChange[]) => void;
   handleAllStandardGraphsCollapse: () => void;
   areStandardGraphsCollapsed: boolean;
+  versionInfo: VersionInfo;
+  isTrackpadMode: boolean;
+  isKeyboardMode: boolean;
+  keyboardNav: KeyboardNavControls;
 }
 
 export function StreamdumpGraphView({
@@ -27,16 +41,47 @@ export function StreamdumpGraphView({
   onEdgesChange,
   handleAllStandardGraphsCollapse,
   areStandardGraphsCollapsed,
+  versionInfo,
+  isTrackpadMode,
+  isKeyboardMode,
+  keyboardNav,
 }: StreamdumpGraphViewProps) {
-  const [isTrackpadMode, setIsTrackpadMode] = useState<boolean>(false);
-  const reactFlowInstance = useReactFlow();
+  const [isCtrlHeld, setIsCtrlHeld] = useState(false);
 
-  // Make the React Flow instance available to the controller
+  // Track when ctrl is held down to enable pointer mouse for clarity that node is clickable
   useEffect(() => {
-    // The controller will use this instance for viewport manipulation, which is handled internally by React Flow
-  }, [reactFlowInstance]);
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.ctrlKey || e.metaKey) setIsCtrlHeld(true);
+    };
+    const handleKeyUp = (e: KeyboardEvent) => {
+      if (!e.ctrlKey && !e.metaKey) setIsCtrlHeld(false);
+    };
+    const handleBlur = () => setIsCtrlHeld(false);
+    window.addEventListener('keydown', handleKeyDown);
+    window.addEventListener('keyup', handleKeyUp);
+    window.addEventListener('blur', handleBlur);
+    return () => {
+      window.removeEventListener('keydown', handleKeyDown);
+      window.removeEventListener('keyup', handleKeyUp);
+      window.removeEventListener('blur', handleBlur);
+    };
+  }, []);
+  const selectedNodeId = isKeyboardMode ? keyboardNav.selectedNodeId : null;
+
+  // TODO: Nice to have. Move DOM focus to the selected node and add ARIA attributes (e.g. aria-selected,
+  // aria-current) during arrow-key navigation so keyboard and screen-reader users have a
+  // programmatic indication of which node is currently selected.
   return (
-    <Box w={'100%'} h={'100%'}>
+    <Box
+      w={'100%'}
+      h={'100%'}
+      className={`${versionInfo.operationType === OperationType.Decompress ? 'decompress-trace' : ''} ${isCtrlHeld && isKeyboardMode ? 'ctrl-held' : ''}`}>
+      {selectedNodeId && (
+        <style>{`[data-id="${selectedNodeId}"] .codec-node,
+          [data-id="${selectedNodeId}"] .graph-node {
+            box-shadow: 0 0 25px 5px #e7e43a;
+          }`}</style>
+      )}
       <ReactFlow
         nodes={nodes}
         edges={edges}
@@ -50,25 +95,23 @@ export function StreamdumpGraphView({
         panOnScroll={isTrackpadMode}>
         <Background />
         <Controls />
-        <Panel>
-          <HStack gap={4}>
-            <Button
-              variant="surface"
-              onClick={() => setIsTrackpadMode(!isTrackpadMode)}
-              title={
-                isTrackpadMode
-                  ? 'Pinch to zoom in/out, swipe or click and drag to move across graph'
-                  : 'Scroll to zoom in/out, click and drag to move across graph'
-              }>
-              {isTrackpadMode ? 'Switch to Mouse Controls' : 'Switch to Trackpad Controls'}
-            </Button>
+        <Panel style={{width: '100%'}}>
+          <Flex justify="space-between">
+            <div className="header-text">
+              <p style={{fontWeight: 'bold'}}>
+                {versionInfo.operationType === OperationType.Decompress ? 'Decompression Trace' : 'Compression Trace'}
+              </p>
+              <p>Library Version: {versionInfo.libraryVersion}</p>
+              <p>Frame Version: {versionInfo.frameVersion}</p>
+              <p>Trace Version: {versionInfo.traceVersion}</p>
+            </div>
             {/* TODO: re-enable once expansion is fixed */}
             {showExpansionButton && (
               <Button onClick={handleAllStandardGraphsCollapse}>
                 {areStandardGraphsCollapsed ? 'Expand all standard graphs' : 'Collapse all standard graphs'}
               </Button>
             )}
-          </HStack>
+          </Flex>
         </Panel>
       </ReactFlow>
     </Box>

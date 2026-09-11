@@ -12,18 +12,12 @@ extern "C" {
 #endif
 
 #define ZL_LIBRARY_VERSION_MAJOR 0
-#define ZL_LIBRARY_VERSION_MINOR 1
-#define ZL_LIBRARY_VERSION_PATCH 0
+#define ZL_LIBRARY_VERSION_MINOR 2
+#define ZL_LIBRARY_VERSION_PATCH 5
 
 #define ZL_LIBRARY_VERSION_NUMBER                                      \
     (ZL_LIBRARY_VERSION_MAJOR * 10000 + ZL_LIBRARY_VERSION_MINOR * 100 \
      + ZL_LIBRARY_VERSION_PATCH * 1)
-
-/**
- * Defined to 0 in the dev copy of zstrong and 1 in the release copy of zstrong.
- * The value is replaced by regex in the release script.
- */
-#define ZL_FBCODE_IS_RELEASE 0
 
 /**
  * The frame fomat version tells zstrong which frame format to
@@ -60,13 +54,16 @@ extern "C" {
 /// format changes. But note that once a library with
 /// max format version X is released, we must support X
 /// through our support window.
-#define ZL_MAX_FORMAT_VERSION (21)
+#define ZL_MAX_FORMAT_VERSION (27)
 
 /// Minimum wire format version required to support chunking.
 #define ZL_CHUNK_VERSION_MIN (21)
 
 /// Minimum wire format version required to support typed input.
 #define ZL_TYPED_INPUT_VERSION_MIN (14)
+
+/// Minimum wire format version required to expose per-node materialized dicts.
+#define ZL_MATERIALIZED_DICT_VERSION_MIN (25)
 
 /**
  * @returns The current encoding version number.
@@ -98,6 +95,20 @@ unsigned ZL_getDefaultEncodingVersion(void);
  * magic number, or if the format version is not supported.
  */
 ZL_Report ZL_getFormatVersionFromFrame(void const* src, size_t srcSize);
+
+/**
+ * Defined to 1 in the fbcode build of OpenZL and 0 in all other cases.
+ */
+#ifndef ZL_IS_FBCODE
+#    define ZL_IS_FBCODE 0
+#endif
+
+/**
+ * Defined to 1 in the fbcode release branch of OpenZL and 0 in all other cases.
+ */
+#ifndef ZL_FBCODE_IS_RELEASE
+#    define ZL_FBCODE_IS_RELEASE 0
+#endif
 
 #ifdef __cplusplus
 } // extern "C"

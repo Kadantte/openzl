@@ -3,8 +3,10 @@
 #include "openzl/decompress/dictx.h"
 #include "openzl/common/allocation.h"
 #include "openzl/common/logging.h"
-#include "openzl/decompress/dctx2.h" // DCTX_* declarations
+#include "openzl/common/operation_context.h" // ZL_OperationContext
+#include "openzl/decompress/dctx2.h"         // DCTX_* declarations
 #include "openzl/zl_data.h"
+#include "openzl/zl_version.h"
 
 ZL_Decoder* DI_createDICtx(ZL_DCtx* dctx)
 {
@@ -107,6 +109,12 @@ ZL_Output* ZL_Decoder_create1StringStream(
 ZL_RBuffer ZL_Decoder_getCodecHeader(const ZL_Decoder* dictx)
 {
     ZL_ASSERT_NN(dictx);
+    DWAYPOINT_WITH_OC(
+            on_ZL_Decoder_getCodecHeader,
+            dictx->dctx,
+            dictx,
+            dictx->thContent.start,
+            dictx->thContent.size);
     return dictx->thContent;
 }
 
@@ -202,6 +210,16 @@ void* ZL_Decoder_getState(const ZL_Decoder* dictx)
 size_t DI_getNbRegens(const ZL_Decoder* dictx)
 {
     return dictx->nbRegens;
+}
+
+const void* ZL_Decoder_getMaterializedDict(const ZL_Decoder* dictx)
+{
+    ZL_ASSERT_NN(dictx);
+    if (DI_getFrameFormatVersion(dictx) < ZL_MATERIALIZED_DICT_VERSION_MIN) {
+        ZL_ASSERT_NULL(dictx->ddict);
+        return NULL;
+    }
+    return dictx->ddict;
 }
 
 void* ZL_Decoder_getScratchSpace(ZL_Decoder* di, size_t size)

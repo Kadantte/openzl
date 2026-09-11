@@ -5,8 +5,25 @@ name: dev-ci
 on:
   push:
     branches: [dev]
+    paths:
+      - '**.c'
+      - '**.h'
+      - '**.cpp'
+      - '**.hpp'
+      - 'Makefile'
+      - 'tests/**'
+      - '.github/workflows/dev-ci.yml'
   pull_request:
     branches: [dev, master, actionsTest]
+    paths:
+      - '**.c'
+      - '**.h'
+      - '**.cpp'
+      - '**.hpp'
+      - 'Makefile'
+      - 'tests/**'
+      - '.github/workflows/dev-ci.yml'
+  workflow_dispatch: {}
 
 env:
   # Common environment variables
@@ -43,9 +60,6 @@ jobs:
             os: ubuntu-latest
             flags: "-Werror -DNDEBUG"
             show_compiler: true
-          - name: "macOS Debug"
-            os: macos-latest
-            flags: "-Werror -Wgnu-anonymous-struct"
           - name: "macOS Release"
             os: macos-latest
             flags: "-Werror -Wgnu-anonymous-struct -DNDEBUG"
@@ -87,16 +101,6 @@ jobs:
             cc: gcc-11
             cxx: g++-11
             flags: ""
-          - name: "GCC 10"
-            os: ubuntu-22.04
-            cc: gcc-10
-            cxx: g++-10
-            flags: ""
-          - name: "GCC 9"
-            os: ubuntu-22.04
-            cc: gcc-9
-            cxx: g++-9
-            flags: "-Werror -Wno-conversion -Wno-sign-conversion"
 
           - name: "Clang 18"
             os: ubuntu-24.04
@@ -118,16 +122,6 @@ jobs:
             cc: clang-15
             cxx: clang++-15
             flags: "-Werror -Wgnu-anonymous-struct -DZS_ENABLE_CLANG_PRAGMA"
-          - name: "Clang 14"
-            os: ubuntu-22.04
-            cc: clang-14
-            cxx: clang++-14
-            flags: "-Werror -Wgnu-anonymous-struct -DZS_ENABLE_CLANG_PRAGMA"
-          - name: "Clang 13"
-            os: ubuntu-22.04
-            cc: clang-13
-            cxx: clang++-13
-            flags: "-Werror -Wgnu-anonymous-struct -DZS_ENABLE_CLANG_PRAGMA -Wno-implicit-fallthrough"
     steps:
       - uses: actions/checkout@v4
       - name: Build
@@ -145,10 +139,10 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - name: "GCC 10 GNU11"
+          - name: "GCC 11 GNU11"
             os: ubuntu-22.04
-            cc: gcc-10
-            cxx: g++-10
+            cc: gcc-11
+            cxx: g++-11
             cflags: "-std=gnu11"
             cxxflags: "-std=gnu++1z"
             flags: "-Werror"
@@ -183,6 +177,30 @@ jobs:
       - name: Run tests
         run: make test
 
+  # Header compatibility tests (compile-only)
+  test-c99-compat:
+    name: C99 Compatibility
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Verify public headers compile under strict C99
+        run: CC=clang make c99_compat
+
+  # CLI training and format tests (comprehensive, slow)
+  test-train:
+    name: CLI Training & Format Tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Run CLI training tests
+        run: make test-train
+      - name: Run CLI format tests
+        run: make test-formats
+
   # Sanitizer testing
   test-sanitizers:
     name: ${{ matrix.name }}
@@ -216,36 +234,30 @@ jobs:
           CC: ${{ matrix.cc || 'cc' }}
         run: make test
 
-  # Code quality checks
+  # # Code quality checks
   test-quality:
     name: Code Quality (clang-format)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - name: Run clang-format style check
-        uses: jidicula/clang-format-action@1ca6f2218b4d8a56817f3654c4a7f47d34117251 # v4.8.0
+        uses: jidicula/clang-format-action@6cd220de46c89139a0365edae93eee8eb30ca8fe # v4.16.0
         with:
-          clang-format-version: '18'
+          clang-format-version: '21'
           check-path: '.'
-          exclude-regex: '.*/fbcode_builder/.*'
+          exclude-regex: '.*/datasets/.*'
 
-  # Static analysis
-  test-static-analysis:
-    name: Static Analysis (scan-build)
+  # Python formatting check
+  test-python-format:
+    name: Code Quality (ruff)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Install scan-build
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y clang-tools
-      - name: Run scan-build
-        continue-on-error: true
-        run: CFLAGS="-Og -g" scan-build --status-bugs -v make -j unitBench V=1
-
-  # =============================================================================
-  # FUTURE WORK / DISABLED JOBS
-  # =============================================================================
-
-  # TODO: Memory sanitizer (msan)
-  # TODO: Thread sanitizer (tsan)
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install ruff
+        run: pip install ruff==0.15.0
+      - name: Check Python formatting with ruff
+        run: make check-python-format

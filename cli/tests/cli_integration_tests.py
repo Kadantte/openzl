@@ -1,17 +1,25 @@
 # Copyright (c) Meta Platforms, Inc. and affiliates.
 
+import os
+import shutil
+import struct
 import sys
+import tempfile
 import unittest
 
 import command_utils
-
 from abstract_compression_test import (
     _BenchmarkBaseTest,
     _CompressDecompressBaseTest,
-    _CsvBaseTest,
     _TrainBaseTest,
-    _TrainInlineBaseTest,
 )
+from command_utils import (
+    CompressorInfo,
+    CompressorType,
+    execute_compress,
+    execute_decompress,
+)
+from file_utils import file_contents_match, input_dir_path
 
 
 class SerialTest(_CompressDecompressBaseTest):
@@ -54,203 +62,56 @@ class SerialTest(_CompressDecompressBaseTest):
         self.compress_and_decompress_samples()
 
 
-class CsvTest(_CsvBaseTest):
+class U8Test(_CompressDecompressBaseTest):
     """
-    Test case for CSV training and compression using the default trainer.
+    Test case for u8 profile compression and decompression.
 
-    This test demonstrates the train-compress-decompress workflow for CSV files
-    using the default training algorithm.
-    Sample files are located in cli/tests/sample_files/csv/
-    Output files are stored in a temporary directory
-    """
-
-    def test_train_compress_decompress(self):
-        """
-        Test the train, compress, and decompress workflow for CSV files using the default trainer.
-
-        This test:
-        1. Trains a compressor on the CSV files in cli/tests/sample_files/csv/ using the default trainer
-        2. Saves the trained compressor to {output_dir_path}/trained_compressor.zlc
-        3. Uses the trained compressor to compress and decompress the CSV files
-        4. Verifies that the decompressed files match the originals
-        """
-        self.train_compress_decompress()
-
-
-class CsvGreedyTest(_CsvBaseTest):
-    """
-    Test case for CSV training and compression using the greedy trainer.
-
-    This test demonstrates the train-compress-decompress workflow for CSV files
-    using the greedy training algorithm. The greedy trainer optimizes compression
-    by making locally optimal choices at each step.
-
-    Sample files are located in cli/tests/sample_files/csv/
-    Output files are stored in {output_dir_path}
-    """
-
-    @property
-    def trainer_name(self) -> str | None:
-        return "greedy"
-
-    def test_train_compress_decompress(self):
-        """
-        Test the train, compress, and decompress workflow for CSV files using the greedy trainer.
-
-        This test:
-        1. Trains a compressor on the CSV files in cli/tests/sample_files/csv/ using the greedy trainer
-        2. Saves the trained compressor to {output_dir_path}/trained_compressor.zlc
-        3. Uses the trained compressor to compress and decompress the CSV files
-        4. Verifies that the decompressed files match the originals
-        """
-        self.train_compress_decompress()
-
-
-class CsvFullSplitTest(_CsvBaseTest):
-    """
-    Test case for CSV training and compression using the full-split trainer.
-
-    This test demonstrates the train-compress-decompress workflow for CSV files
-    using the full-split training algorithm. The full-split trainer optimizes compression
-    by analyzing the entire dataset before making decisions.
-
-    Sample files are located in cli/tests/sample_files/csv/
-    Output files are stored in {output_dir_path}/csv_full_split/
-    """
-
-    @property
-    def trainer_name(self) -> str | None:
-        return "full-split"
-
-    def test_train_compress_decompress(self):
-        """
-        Test the train, compress, and decompress workflow for CSV files using the full-split trainer.
-
-        This test:
-        1. Trains a compressor on the CSV files in cli/tests/sample_files/csv/ using the full-split trainer
-        2. Saves the trained compressor to {output_dir_path}/trained_compressor.zlc
-        3. Uses the trained compressor to compress and decompress the CSV files
-        4. Verifies that the decompressed files match the originals
-        """
-        self.train_compress_decompress()
-
-
-class CsvBottomUpTest(_CsvBaseTest):
-    """
-    Test case for CSV training and compression using the bottom-up eedy trainer.
-
-    This test demonstrates the train-compress-decompress workflow for CSV files
-    using the greedy training algorithm. The greedy trainer optimizes compression
-    by making locally optimal choices at each step.
-
-    Sample files are located in cli/tests/sample_files/csv/
-    Output files are stored in {output_dir_path}
-    """
-
-    @property
-    def trainer_name(self) -> str | None:
-        return "bottom-up"
-
-    def test_train_compress_decompress(self):
-        """
-        Test the train, compress, and decompress workflow for CSV files using the full-split trainer.
-
-        This test:
-        1. Trains a compressor on the CSV files in cli/tests/sample_files/csv/ using the full-split trainer
-        2. Saves the trained compressor to {output_dir_path}/trained_compressor.zlc
-        3. Uses the trained compressor to compress and decompress the CSV files
-        4. Verifies that the decompressed files match the originals
-        """
-        self.train_compress_decompress()
-
-
-class ParquetTest(_TrainBaseTest):
-    """
-    Parquet compression tests with training.
-
+    This test verifies that the u8 (unsigned 8-bit) profile
+    can compress and decompress 8-bit data correctly.
+    Sample files are located in cli/tests/sample_files/u8/
     """
 
     @property
     def input_dir_name(self) -> str:
-        """
-        Return the directory name for input sample files.
-
-        This property determines where sample files are located:
-        cli/tests/sample_files/parquet/
-
-        Returns:
-            "parquet" as the input directory name
-        """
-        return "parquet"
+        return "u8"
 
     @property
     def compressor_profile_name(self) -> str:
-        """
-        Return the profile name to use for compression/training.
-
-        Returns:
-            "parquet" as the profile name
-        """
-        return "parquet"
-
-    def test_train_compress_decompress(self):
-        """
-        Test the train, compress, and decompress workflow for Parquet files using the clustering trainer.
-
-        This test:
-        1. Trains a compressor on the Parquet files in cli/tests/sample_files/parquet/
-        2. Saves the trained compressor to {output_dir_path}/trained_compressor.zlc
-        3. Uses the trained compressor to compress and decompress the Parquet files
-        4. Verifies that the decompressed files match the originals
-        """
-        self.train_compress_decompress()
-
-
-class CsvTrainInlineTest(_TrainInlineBaseTest):
-    @property
-    def input_file_name(self) -> str:
-        return "csv/input_experiments.csv"
-
-    @property
-    def compressor_profile_name(self) -> str:
-        return "csv"
-
-    def test_train_inline(self) -> None:
-        self.train_inline()
-
-
-class AceTrainInlineTest(_TrainInlineBaseTest):
-    @property
-    def input_file_name(self) -> str:
-        return "ace/newlines.txt"
-
-    @property
-    def compressor_profile_name(self) -> str:
-        return "serial"
-
-    def test_train_inline(self) -> None:
-        self.train_inline()
-
-
-class CsvAlternativeSeparatorTest(_CompressDecompressBaseTest):
-    """
-    Test case for CSV compression and decompression with an alternate separator.
-    """
-
-    @property
-    def input_dir_name(self) -> str:
-        return "tbl"
-
-    @property
-    def compressor_profile_name(self) -> str:
-        return "csv"
-
-    @property
-    def extra_args(self) -> str | None:
-        return "--profile-arg '|'"
+        return "u8"
 
     def test_compress_decompress(self):
+        """
+        Test that u8 profile can compress and decompress 8-bit data.
+
+        This test:
+        1. Compresses all files in cli/tests/sample_files/u8/
+        2. Decompresses the compressed files
+        3. Verifies that the decompressed files match the originals
+        """
         self.compress_and_decompress_samples()
+
+
+class U8QuickTrainTest(_TrainBaseTest):
+    """
+    Quick sanity check that the train command works.
+
+    Uses tiny u8 sample files (~2.6KB total) so training completes almost
+    instantly. This is not about training quality — just that the train →
+    compress → decompress pipeline doesn't crash.
+
+    For in-depth training tests, see cli_train_tests.py (run via `make test-train`).
+    """
+
+    @property
+    def input_dir_name(self) -> str:
+        return "u8"
+
+    @property
+    def compressor_profile_name(self) -> str:
+        return "u8"
+
+    def test_train_compress_decompress(self):
+        self.train_compress_decompress()
 
 
 class BenchmarkCsvCompressionTest(_BenchmarkBaseTest):
@@ -270,13 +131,659 @@ class BenchmarkCsvCompressionTest(_BenchmarkBaseTest):
         self.benchmark()
 
 
+class TraceTest(_CompressDecompressBaseTest):
+    """
+    Test case for compression and decompression with tracing enabled.
+
+    This test verifies that the --trace and --trace-streams-dir flags work
+    correctly during compress and decompress without crashing, and that
+    trace output files are actually created. Tests that need full stream
+    traces must opt out of StoreOnExpansion explicitly.
+    """
+
+    @property
+    def input_dir_name(self) -> str:
+        return "trace"
+
+    @property
+    def compressor_profile_name(self) -> str:
+        return "csv"
+
+    def test_compress_decompress_with_trace(self):
+        """
+        Test that compress and decompress with --trace flags produce trace files
+        and roundtrip correctly.
+
+        This test:
+        1. Compresses a CSV sample with --trace, --trace-streams-dir, and
+           --no-store-on-expansion
+        2. Asserts the compress trace CBOR file exists and is non-empty
+        3. Decompresses with --trace
+        4. Asserts the decompress trace CBOR file exists and is non-empty
+        5. Verifies the decompressed file matches the original (roundtrip check)
+        """
+        sample = self.input_samples[0]
+
+        compress_trace_path = os.path.join(self.output_dir_path, "compress_trace.cbor")
+        decompress_trace_path = os.path.join(
+            self.output_dir_path, "decompress_trace.cbor"
+        )
+        streams_dir = os.path.join(self.output_dir_path, "streams")
+        os.makedirs(streams_dir, exist_ok=True)
+
+        execute_compress(
+            file_to_compress_path=sample.orig_file_path,
+            compressor_info=self.compressor_info,
+            compressed_file_path=sample.compressed_file_path,
+            extra_args=(
+                f"--trace {compress_trace_path} "
+                f"--trace-streams-dir {streams_dir} "
+                "--no-store-on-expansion"
+            ),
+        )
+
+        self.assertTrue(
+            os.path.exists(sample.compressed_file_path),
+            "Compressed file was not created",
+        )
+        self.assertTrue(
+            os.path.exists(compress_trace_path),
+            "Compress trace file was not created",
+        )
+        self.assertGreater(
+            os.path.getsize(compress_trace_path),
+            0,
+            "Compress trace file is empty",
+        )
+        self.assertGreater(
+            len(os.listdir(streams_dir)),
+            0,
+            "Compress streams dir is empty",
+        )
+
+        decompress_streams_dir = os.path.join(
+            self.output_dir_path, "decompress_streams"
+        )
+        os.makedirs(decompress_streams_dir, exist_ok=True)
+
+        execute_decompress(
+            compressed_file_path=sample.compressed_file_path,
+            decompressed_file_path=sample.decompressed_file_path,
+            extra_args=f"--trace {decompress_trace_path} --trace-streams-dir {decompress_streams_dir}",
+        )
+
+        self.assertTrue(
+            os.path.exists(decompress_trace_path),
+            "Decompress trace file was not created",
+        )
+        self.assertGreater(
+            os.path.getsize(decompress_trace_path),
+            0,
+            "Decompress trace file is empty",
+        )
+        self.assertGreater(
+            len(os.listdir(decompress_streams_dir)),
+            0,
+            "Decompress streams dir is empty",
+        )
+
+        self.assertTrue(
+            sample.original_matches_decompressed,
+            f"Decompressed file does not match original: {sample.orig_file_path}",
+        )
+
+    def test_trace_does_not_change_compressed_output(self):
+        """
+        Test that compression tracing does not change the compressed bytes.
+
+        This uses a checked-in random sample that exercises StoreOnExpansion
+        for the serial profile. The traced output should match the default
+        output, not the --no-store-on-expansion output.
+        """
+        random_input_path = os.path.join(input_dir_path("u8"), "random_u8.bin")
+
+        compressor_info = CompressorInfo(
+            compressor_str="serial",
+            compressor_type=CompressorType.PROFILE,
+        )
+        plain_compressed_path = os.path.join(
+            self.output_dir_path, "plain_random_input.zl"
+        )
+        traced_compressed_path = os.path.join(
+            self.output_dir_path, "traced_random_input.zl"
+        )
+        no_store_compressed_path = os.path.join(
+            self.output_dir_path, "no_store_random_input.zl"
+        )
+        trace_path = os.path.join(self.output_dir_path, "random_trace.cbor")
+        streams_dir = os.path.join(self.output_dir_path, "random_trace_streams")
+        os.makedirs(streams_dir, exist_ok=True)
+
+        execute_compress(
+            file_to_compress_path=random_input_path,
+            compressor_info=compressor_info,
+            compressed_file_path=plain_compressed_path,
+            extra_args=None,
+        )
+        execute_compress(
+            file_to_compress_path=random_input_path,
+            compressor_info=compressor_info,
+            compressed_file_path=traced_compressed_path,
+            extra_args=f"--trace {trace_path} --trace-streams-dir {streams_dir}",
+        )
+        execute_compress(
+            file_to_compress_path=random_input_path,
+            compressor_info=compressor_info,
+            compressed_file_path=no_store_compressed_path,
+            extra_args="--no-store-on-expansion",
+        )
+
+        self.assertFalse(
+            file_contents_match(plain_compressed_path, no_store_compressed_path),
+            "Test input did not exercise StoreOnExpansion",
+        )
+
+        self.assertTrue(
+            file_contents_match(plain_compressed_path, traced_compressed_path),
+            "Compression tracing changed the compressed output",
+        )
+        self.assertTrue(
+            os.path.exists(trace_path),
+            "Compress trace file was not created",
+        )
+        self.assertGreater(
+            os.path.getsize(trace_path),
+            0,
+            "Compress trace file is empty",
+        )
+
+
+class NumericSegmentationTest(unittest.TestCase):
+    """
+    Test case for numeric profile auto-segmentation via the CLI.
+
+    Generates binary numeric data, compresses with numeric profiles,
+    decompresses, and verifies round-trip correctness. Tests multiple
+    element widths and chunk sizes to exercise the segmenter.
+    """
+
+    def setUp(self) -> None:
+        self.tmpdir = tempfile.mkdtemp()
+        self.addCleanup(lambda: shutil.rmtree(self.tmpdir, True))
+
+        # Generate ~2MB of data per profile so --chunk-size 1M triggers
+        # multi-chunk segmentation (2 chunks).
+        self.test_files: dict[str, dict] = {}
+        target_bytes = 2 * 1000 * 1000  # 2 MB
+        configs = [
+            ("u8", "<", "B", 1),
+            ("le-u16", "<", "H", 2),
+            ("le-i32", "<", "i", 4),
+            ("le-u32", "<", "I", 4),
+            ("le-u64", "<", "Q", 8),
+            ("be-u16", ">", "H", 2),
+            ("be-i16", ">", "h", 2),
+            ("be-u32", ">", "I", 4),
+            ("be-i32", ">", "i", 4),
+            ("be-u64", ">", "Q", 8),
+            ("be-i64", ">", "q", 8),
+        ]
+        for profile, endian, fmt, elt_size in configs:
+            n = target_bytes // elt_size
+            if fmt.islower():
+                max_val = 2 ** (elt_size * 8 - 1)
+                values = [(i % max_val) - max_val // 2 for i in range(n)]
+            else:
+                max_val = 2 ** (elt_size * 8)
+                values = [i % max_val for i in range(n)]
+            data = struct.pack(f"{endian}{n}{fmt}", *values)
+            path = os.path.join(self.tmpdir, f"{profile}.bin")
+            with open(path, "wb") as f:
+                f.write(data)
+            self.test_files[profile] = {
+                "path": path,
+                "profile": profile,
+                "size": len(data),
+            }
+
+    def _round_trip(
+        self,
+        profile: str,
+        input_path: str,
+        extra_args: str | None = None,
+        output_suffix: str = "",
+    ) -> str:
+        """Compress, decompress, and verify round-trip for a single file."""
+        compressed_path = input_path + output_suffix + ".zl"
+        decompressed_path = input_path + output_suffix + ".rt"
+
+        compressor_info = CompressorInfo(
+            compressor_str=profile,
+            compressor_type=CompressorType.PROFILE,
+        )
+        execute_compress(
+            file_to_compress_path=input_path,
+            compressor_info=compressor_info,
+            compressed_file_path=compressed_path,
+            extra_args=extra_args,
+        )
+        execute_decompress(
+            compressed_file_path=compressed_path,
+            decompressed_file_path=decompressed_path,
+        )
+        self.assertTrue(
+            file_contents_match(input_path, decompressed_path),
+            f"Round-trip failed for profile {profile} on {input_path}",
+        )
+        return compressed_path
+
+    def test_numeric_profiles_roundtrip(self) -> None:
+        """Test that all numeric profiles compress and decompress correctly."""
+        for name, info in self.test_files.items():
+            with self.subTest(profile=name):
+                self._round_trip(info["profile"], info["path"])
+
+    def test_numeric_profiles_compress_at_level_7(self) -> None:
+        """Test that level 7 applies useful numeric compression."""
+        for profile in ("le-u32", "be-u32"):
+            info = self.test_files[profile]
+            with self.subTest(profile=profile):
+                compressed_path = self._round_trip(
+                    info["profile"],
+                    info["path"],
+                    extra_args="--level 7",
+                    output_suffix=".level7",
+                )
+                self.assertLess(
+                    os.path.getsize(compressed_path),
+                    info["size"],
+                    f"{profile} stored rather than compressed the numeric input",
+                )
+
+    def test_equivalent_endianness_has_matching_compressed_size(self) -> None:
+        """Test equivalent LE and BE inputs produce equal compressed sizes."""
+        level7_outputs: dict[str, str] = {}
+        for profile in ("le-u32", "be-u32"):
+            info = self.test_files[profile]
+            with self.subTest(profile=profile):
+                compressed_path = self._round_trip(
+                    info["profile"],
+                    info["path"],
+                    extra_args="--level 7",
+                    output_suffix=".level7.parity",
+                )
+                level7_outputs[profile] = compressed_path
+
+        # This compares whole-frame sizes and therefore relies on the current
+        # format using equal-sized encodings for the LE and BE interpretation
+        # nodes. Compare payload sizes instead if a stable API exposes them.
+        self.assertEqual(
+            os.path.getsize(level7_outputs["le-u32"]),
+            os.path.getsize(level7_outputs["be-u32"]),
+            "Equivalent little- and big-endian inputs compressed differently",
+        )
+
+    def test_numeric_profiles_with_chunk_size(self) -> None:
+        """Test numeric profiles with --chunk-size 1M on 2MB data (forces 2 chunks)."""
+        for name, info in self.test_files.items():
+            with self.subTest(profile=name):
+                self._round_trip(
+                    info["profile"],
+                    info["path"],
+                    extra_args="--chunk-size 1M",
+                )
+
+
+class CompressionLevelTest(unittest.TestCase):
+    """Test explicit compression levels in the compress command."""
+
+    def setUp(self) -> None:
+        self.tmpdir = tempfile.mkdtemp()
+        self.addCleanup(lambda: shutil.rmtree(self.tmpdir, True))
+
+        values = list(range(16384)) * 4
+        self.input_path = os.path.join(self.tmpdir, "u32.bin")
+        with open(self.input_path, "wb") as f:
+            f.write(struct.pack(f"<{len(values)}I", *values))
+
+    def _compress_and_round_trip(
+        self,
+        profile: str,
+        level: int,
+        extra_args: str = "",
+        output_suffix: str = "",
+        input_path: str | None = None,
+    ) -> str:
+        source_path = input_path or self.input_path
+        compressed_path = os.path.join(
+            self.tmpdir, f"{profile}-level-{level}{output_suffix}.zl"
+        )
+        decompressed_path = compressed_path + ".rt"
+        execute_compress(
+            file_to_compress_path=source_path,
+            compressor_info=CompressorInfo(
+                compressor_str=profile,
+                compressor_type=CompressorType.PROFILE,
+            ),
+            compressed_file_path=compressed_path,
+            extra_args=f"--level {level} {extra_args}",
+        )
+        execute_decompress(
+            compressed_file_path=compressed_path,
+            decompressed_file_path=decompressed_path,
+        )
+        self.assertTrue(file_contents_match(source_path, decompressed_path))
+        return compressed_path
+
+    def test_compression_level(self) -> None:
+        zstd_level_1 = self._compress_and_round_trip("zstd", 1)
+        zstd_level_19 = self._compress_and_round_trip("zstd", 19)
+        with open(zstd_level_1, "rb") as level_1_file:
+            with open(zstd_level_19, "rb") as level_19_file:
+                self.assertNotEqual(level_1_file.read(), level_19_file.read())
+
+        numeric_level_7 = self._compress_and_round_trip("le-u32", 7)
+        numeric_level_7_trained = self._compress_and_round_trip(
+            "le-u32",
+            7,
+            "--train-inline --train-inline-test-limit 1",
+            "-train-inline",
+        )
+        self.assertLessEqual(
+            os.path.getsize(numeric_level_7_trained),
+            os.path.getsize(numeric_level_7),
+        )
+
+        invalid_output = os.path.join(self.tmpdir, "invalid-level.zl")
+        self.assertNotEqual(
+            command_utils.execute_command(
+                f"compress {self.input_path} --profile le-u32 "
+                f"--level invalid -o {invalid_output}"
+            ),
+            0,
+        )
+
+    def _write_sao_file(self) -> str:
+        sao_path = os.path.join(self.tmpdir, "sao.bin")
+        with open(sao_path, "wb") as sao_file:
+            sao_file.write(bytes(28))
+            for i in range(16384):
+                sao_file.write(
+                    struct.pack(
+                        "<dd2shff",
+                        i / 8192.0,
+                        (i % 4096) / 2048.0 - 1.0,
+                        (b"G2", b"K1", b"M0")[i % 3],
+                        (i % 3000) - 1500,
+                        (i % 1024) / 1024.0,
+                        -((i % 2048) / 2048.0),
+                    )
+                )
+        return sao_path
+
+    @staticmethod
+    def _trace_uses_transformer(trace_path: str) -> bool:
+        with open(trace_path, "rb") as trace_file:
+            # CBOR text strings retain their UTF-8 representation in the trace.
+            return b"zl.private.transformer_" in trace_file.read()
+
+    def test_sao_compression_level(self) -> None:
+        sao_path = self._write_sao_file()
+        level_6_trace = os.path.join(self.tmpdir, "sao-level-6.trace")
+        level_7_trace = os.path.join(self.tmpdir, "sao-level-7.trace")
+        self._compress_and_round_trip(
+            "sao",
+            6,
+            extra_args=f"--trace {level_6_trace} --no-stream-preview",
+            input_path=sao_path,
+        )
+        self._compress_and_round_trip(
+            "sao",
+            7,
+            extra_args=f"--trace {level_7_trace} --no-stream-preview",
+            input_path=sao_path,
+        )
+        self.assertFalse(self._trace_uses_transformer(level_6_trace))
+        self.assertTrue(self._trace_uses_transformer(level_7_trace))
+
+
+class SerialSegmentationTest(unittest.TestCase):
+    """
+    Test case for the serial profile's auto-segmentation via the CLI.
+
+    Generates raw byte data, compresses with the `serial` profile, decompresses,
+    and verifies round-trip correctness with and without --chunk-size.
+    """
+
+    def setUp(self) -> None:
+        import shutil
+        import tempfile
+
+        self.tmpdir = tempfile.mkdtemp()
+        self.addCleanup(lambda: shutil.rmtree(self.tmpdir, True))
+
+        # Generate ~2MB of data so --chunk-size 1M triggers multi-chunk
+        # segmentation (2 chunks).
+        target_bytes = 2 * 1000 * 1000  # 2 MB
+        data = bytes((i % 256) for i in range(target_bytes))
+        self.input_path: str = os.path.join(self.tmpdir, "serial.bin")
+        with open(self.input_path, "wb") as f:
+            f.write(data)
+
+    def _round_trip(self, extra_args: str | None = None) -> None:
+        compressed_path = self.input_path + ".zl"
+        decompressed_path = self.input_path + ".rt"
+
+        compressor_info = CompressorInfo(
+            compressor_str="serial",
+            compressor_type=CompressorType.PROFILE,
+        )
+        execute_compress(
+            file_to_compress_path=self.input_path,
+            compressor_info=compressor_info,
+            compressed_file_path=compressed_path,
+            extra_args=extra_args,
+        )
+        execute_decompress(
+            compressed_file_path=compressed_path,
+            decompressed_file_path=decompressed_path,
+        )
+        from file_utils import file_contents_match
+
+        self.assertTrue(
+            file_contents_match(self.input_path, decompressed_path),
+            f"Round-trip failed for serial profile on {self.input_path}",
+        )
+
+    def test_serial_default_chunk_size(self) -> None:
+        """Default chunk size (16 MiB) on 2MB data → single-chunk segmentation."""
+        self._round_trip()
+
+    def test_serial_with_chunk_size(self) -> None:
+        """--chunk-size 1M on 2MB data forces multi-chunk segmentation."""
+        self._round_trip(extra_args="--chunk-size 1M")
+
+
+class StrictModeTest(_CompressDecompressBaseTest):
+    """
+    Test case for strict mode behavior.
+
+    This test verifies that:
+    1. By default (permissive mode), compression succeeds even when using a
+       mismatched profile (e.g., le-u64 profile on data not divisible by 8)
+    2. With --strict flag, compression fails on mismatched data
+
+    The test uses the le-u64 profile (64-bit little-endian unsigned integers)
+    to compress data whose size is NOT a multiple of 8 bytes. This should:
+    - Succeed in permissive mode (default) by falling back to generic compression
+    - Fail in strict mode because the input size doesn't match 64-bit alignment
+    """
+
+    @property
+    def input_dir_name(self) -> str:
+        return "serial"
+
+    @property
+    def compressor_profile_name(self) -> str:
+        # Use le-u64 profile which expects input size to be multiple of 8 bytes
+        return "le-u64"
+
+    def test_permissive_mode_succeeds(self):
+        """
+        Test that compression succeeds in permissive mode (default).
+
+        This verifies that when using a mismatched profile (le-u64 on non-aligned data),
+        the compression falls back to generic compression and succeeds.
+        """
+        self.compress_and_decompress_samples()
+
+    def test_strict_mode_fails(self):
+        """
+        Test that compression fails in strict mode with mismatched data.
+
+        This verifies that when using --strict flag with a mismatched profile,
+        the compression fails instead of falling back to generic compression.
+
+        Note: Only files whose size is NOT a multiple of 8 AND larger than
+        a minimum threshold will trigger the failure. Very small files may
+        be handled differently by the compression pipeline.
+        """
+        from command_utils import execute_command
+
+        failed_count = 0
+        for sample in self.input_samples:
+            # Attempt compression with --strict flag
+            cflag = self.compressor_info.compressor_type.value
+            cstr = self.compressor_info.compressor_str
+
+            compress_args = f"compress {sample.orig_file_path} --{cflag} {cstr} -o {sample.compressed_file_path} --strict"
+
+            result = execute_command(compress_args)
+
+            if result != 0:
+                failed_count += 1
+                print(f"Strict mode correctly failed for {sample.orig_file_path}")
+
+        # At least one file should fail in strict mode
+        self.assertGreater(
+            failed_count,
+            0,
+            "Expected at least one compression to fail in strict mode",
+        )
+
+        print(
+            f"Verified that strict mode fails: {failed_count} file(s) failed as expected"
+        )
+
+
+class ChunkSizeBinarySuffixTest(_CompressDecompressBaseTest):
+    """
+    Test that --chunk-size accepts binary suffixes (KiB, MiB, etc.)
+    through the checked integer parsing.
+    """
+
+    @property
+    def input_dir_name(self) -> str:
+        return "serial"
+
+    @property
+    def compressor_profile_name(self) -> str:
+        return "serial"
+
+    @property
+    def extra_args(self) -> str | None:
+        return "--chunk-size 512KiB"
+
+    def test_compress_decompress(self):
+        self.compress_and_decompress_samples()
+
+
+class InvalidChunkSizeTest(unittest.TestCase):
+    """
+    Test that --chunk-size with an invalid suffix is rejected by the CLI.
+    """
+
+    def setUp(self) -> None:
+        self.tmpdir = tempfile.mkdtemp()
+        self.addCleanup(lambda: shutil.rmtree(self.tmpdir, True))
+
+    def test_invalid_suffix_rejected(self):
+        sample_dir = os.path.join(self.tmpdir, "input")
+        os.makedirs(sample_dir)
+        sample_path = os.path.join(sample_dir, "dummy.bin")
+        with open(sample_path, "wb") as f:
+            f.write(b"\x00" * 1024)
+
+        compressed_path = os.path.join(self.tmpdir, "out.zl")
+        result = command_utils.execute_command(
+            f"compress {sample_path} --profile serial "
+            f"-o {compressed_path} --chunk-size 1XYZ"
+        )
+        self.assertNotEqual(result, 0, "CLI should reject invalid suffix 'XYZ'")
+
+
+class VersionTest(unittest.TestCase):
+    """Test that --version and -V flags work correctly."""
+
+    def test_version_exits_zero(self):
+        result = command_utils.execute_command("--version")
+        self.assertEqual(result, 0)
+
+    def test_short_version_exits_zero(self):
+        result = command_utils.execute_command("-V")
+        self.assertEqual(result, 0)
+
+    def test_version_and_short_version_are_identical(self):
+        import subprocess
+
+        version_out = subprocess.check_output(
+            f"{command_utils.CLI_CPP} --version", shell=True
+        ).decode()
+        short_out = subprocess.check_output(
+            f"{command_utils.CLI_CPP} -V", shell=True
+        ).decode()
+        self.assertEqual(version_out, short_out)
+
+
+class ZstdDictTrainingTest(_TrainBaseTest):
+    """
+    Test case for zstd dict training via the CLI.
+
+    This test verifies that the zstd profile can be trained using dict
+    training (no clustering/ACE required) and that the trained compressor
+    produces valid compressed output that decompresses correctly.
+    Sample files are located in cli/tests/sample_files/zstd_dict/
+    """
+
+    @property
+    def input_dir_name(self) -> str:
+        return "zstd_dict"
+
+    @property
+    def compressor_profile_name(self) -> str:
+        return "zstd"
+
+    def test_train_compress_decompress(self):
+        """
+        Test the train, compress, and decompress workflow for the zstd profile.
+
+        This test:
+        1. Trains a compressor on files in cli/tests/sample_files/zstd_dict/
+           using the zstd profile (dict training only, no clustering)
+        2. Saves the trained compressor + dict bundle to output dir
+        3. Uses the trained compressor to compress and decompress the files
+        4. Verifies that the decompressed files match the originals
+        """
+        self.train_dict_compress_decompress()
+
+
 def main():
     """
     Run the test suite with proper command line arguments.
 
     This script expects the CLI binary path as the first command line argument.
     The CLI binary path can be provided either when built with buck or make:
-    - Buck: $(location //data_compression/experimental/zstrong/cli:zli)
+    - Buck: $(location cli:zli)
     - Make: "${PROJECT_BINARY_DIR}/cli/zli"
 
     The CLI binary path is used to execute commands in command_utils.py.

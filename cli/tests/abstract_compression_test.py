@@ -14,13 +14,19 @@ from command_utils import (
     execute_train,
     execute_train_inline,
 )
-
 from file_utils import (
     file_contents_match,
     get_sample_files_from_dir,
     input_dir_path,
     SampleFile,
 )
+
+try:
+    import openzl.ext as _zl  # noqa: F401
+
+    HAS_OPENZL_EXT = True
+except ImportError:
+    HAS_OPENZL_EXT = False
 
 
 class _CompressDecompressBaseTest(unittest.TestCase):
@@ -208,11 +214,12 @@ class _TrainBaseTest(_CompressDecompressBaseTest):
 
     def train_compress_decompress(self) -> None:
         """
-        Test the full workflow of training, compressing, and decompressing.
+        Test the full workflow of training, compressing, and decompressing
+        without dict bundles.
 
         This method:
         1. Trains a compressor on the sample files using the specified trainer (self.trainer_name)
-        2. Saves the trained compressor to {output_dir_path}/trained_compressor.zlc
+        2. Asserts that no dict bundle (.zd) was produced
         3. Uses the trained compressor to compress and decompress the sample files
         4. Verifies that the decompressed files match the originals
 
@@ -229,10 +236,188 @@ class _TrainBaseTest(_CompressDecompressBaseTest):
             uncompressed_dir=input_dir_path(self.input_dir_name),
             trained_compressor_path=self.compressor_info.compressor_str,
             trainer_name=self.trainer_name,
+            extra_args=self.extra_args,
+        )
+
+        trained_path = self.compressor_info.compressor_str
+        dict_bundle_path = os.path.splitext(trained_path)[0] + ".zd"
+        assert not os.path.exists(dict_bundle_path), (
+            f"Expected no dict bundle but found {dict_bundle_path}"
         )
 
         # Compress and decompress using the trained compressor
         self.compress_and_decompress_samples()
+
+    def train_dict_compress_decompress(self) -> None:
+        """
+        Test the full workflow of training with dict bundles, compressing,
+        and decompressing.
+
+        This method:
+        1. Trains a compressor on the sample files using the specified trainer (self.trainer_name)
+        2. Asserts that a dict bundle (.zd) was produced
+        3. Uses the trained compressor and dict bundle to compress and decompress the sample files
+        4. Verifies that the decompressed files match the originals
+
+        The trainer_name property determines which training algorithm is used (e.g., "greedy", "full-split").
+
+        Raises:
+            ValueError: If no input samples are found or if decompression fails
+        """
+        if not self.input_samples:
+            raise ValueError("No input samples found for training")
+
+        dict_bundle_path = (
+            os.path.splitext(self.compressor_info.compressor_str)[0] + ".zd"
+        )
+        execute_train(
+            compressor_info=self.training_compressor_info,
+            uncompressed_dir=input_dir_path(self.input_dir_name),
+            trained_compressor_path=self.compressor_info.compressor_str,
+            trainer_name=self.trainer_name,
+            extra_args=" ".join(
+                [self.extra_args or "", "--dict-bundle-output", dict_bundle_path]
+            ),
+        )
+        assert os.path.exists(dict_bundle_path), (
+            f"Expected dict bundle at {dict_bundle_path} but it was not produced"
+        )
+        bundle_extra = f"--dict-bundle {dict_bundle_path}"
+
+        # Compress and decompress using the trained compressor
+        for sample in self.input_samples:
+            compress_extra = (
+                " ".join(filter(None, [self.extra_args, bundle_extra])) or None
+            )
+            execute_compress(
+                file_to_compress_path=sample.orig_file_path,
+                compressor_info=self.compressor_info,
+                compressed_file_path=sample.compressed_file_path,
+                extra_args=compress_extra,
+            )
+
+            execute_decompress(
+                compressed_file_path=sample.compressed_file_path,
+                decompressed_file_path=sample.decompressed_file_path,
+                extra_args=bundle_extra,
+            )
+
+            if not sample.original_matches_decompressed:
+                raise ValueError(
+                    f"Decompressed file does not match original file: {sample.orig_file_path}"
+                )
+
+
+class _MLBaseTest(_TrainBaseTest):
+    """
+    Abstract base class for ML compression tests with training.
+    """
+
+    def setUp(self) -> None:
+        super().setUp()
+        # Create the serialized compressors folder once per test
+        self.serialized_compressors_folder = self.get_serialized_compressors()
+
+    def get_serialized_compressors(self) -> str:
+        """
+        Generate serialized compressors using static successors from numeric-ml-selector-64 profile.
+
+        Returns:
+            str: Path to the temporary folder containing the serialized .cbor files
+        """
+        import openzl.ext as zl
+
+        def field_lz() -> bytes:
+            compressor = zl.Compressor()
+            graph = zl.graphs.FieldLz()(compressor)
+            compressor.select_starting_graph(graph)
+            return compressor.serialize()
+
+        def delta_field_lz() -> bytes:
+            compressor = zl.Compressor()
+            graph = zl.graphs.FieldLz()(compressor)
+            graph = zl.nodes.DeltaInt()(compressor, graph)
+            compressor.select_starting_graph(graph)
+            return compressor.serialize()
+
+        def range_pack() -> bytes:
+            compressor = zl.Compressor()
+            graph = zl.nodes.RangePack()(compressor, successor=zl.graphs.FieldLz())
+            compressor.select_starting_graph(graph)
+            return compressor.serialize()
+
+        def range_pack_zstd() -> bytes:
+            compressor = zl.Compressor()
+            graph = zl.nodes.RangePack()(compressor, successor=zl.graphs.Zstd())
+            compressor.select_starting_graph(graph)
+            return compressor.serialize()
+
+        def tokenize_delta_fieldlz() -> bytes:
+            compressor = zl.Compressor()
+            delta_fieldlz = zl.nodes.DeltaInt()(compressor, zl.graphs.FieldLz())
+            tokenize = zl.nodes.Tokenize(type=zl.Type.Numeric, sort=True)
+            graph = tokenize(
+                compressor,
+                alphabet=delta_fieldlz,
+                indices=zl.graphs.FieldLz(),
+            )
+            compressor.select_starting_graph(graph)
+            return compressor.serialize()
+
+        def zstd() -> bytes:
+            compressor = zl.Compressor()
+            graph = zl.graphs.Zstd()(compressor)
+            compressor.select_starting_graph(graph)
+            return compressor.serialize()
+
+        compressors = {
+            "00_field_lz": field_lz(),
+            "01_range_pack": range_pack(),
+            "02_range_pack_zstd": range_pack_zstd(),
+            "03_delta_field_lz": delta_field_lz(),
+            "04_tokenize_delta_fieldlz": tokenize_delta_fieldlz(),
+            "05_zstd": zstd(),
+        }
+
+        # Create a temporary directory for the serialized compressors
+        compressor_dir = tempfile.mkdtemp()
+        self.addCleanup(lambda: shutil.rmtree(compressor_dir, True))
+
+        for name, data in compressors.items():
+            with open(os.path.join(compressor_dir, f"{name}.cbor"), "wb") as f:
+                f.write(data)
+
+        return compressor_dir
+
+    @property
+    def input_dir_name(self) -> str:
+        """
+        Return the directory name for input sample files.
+
+        This property determines where sample files are located:
+        cli/tests/sample_files/ml_selector/
+
+        Note: sample files are generated using the following command from
+        tutorial in examples/ml_selector and taking the first file:
+
+        ```
+        buck2 run @//mode/opt examples/ml_selector:generate_data -- /tmp/ml_test_samples
+        ```
+
+        Returns:
+            "ml_selector" as the input directory name
+        """
+        return "ml_selector"
+
+    @property
+    def compressor_profile_name(self) -> str:
+        """
+        Return the profile name to use for compression/training.
+
+        Returns:
+            "numeric-ml-selector-64" as the profile name
+        """
+        return "numeric-ml-selector-64"
 
 
 class _CsvBaseTest(_TrainBaseTest):

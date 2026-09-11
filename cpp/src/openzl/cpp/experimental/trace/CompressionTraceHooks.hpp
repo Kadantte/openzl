@@ -3,7 +3,7 @@
 #pragma once
 
 #include "openzl/cpp/CompressIntrospectionHooks.hpp"
-#include "openzl/cpp/experimental/trace/Tracer.hpp"
+#include "openzl/cpp/experimental/trace/CompressTracer.hpp"
 #include "openzl/cpp/poly/StringView.hpp"
 #include "openzl/shared/a1cbor.h"
 #include "openzl/zl_opaque_types.h"
@@ -17,17 +17,34 @@
 namespace openzl::visualizer {
 class CompressionTraceHooks : public openzl::CompressIntrospectionHooks {
    public:
-    CompressionTraceHooks()           = default;
+    explicit CompressionTraceHooks(bool showStreamPreview)
+            : showStreamPreview_(showStreamPreview)
+    {
+    }
     ~CompressionTraceHooks() override = default;
 
     std::pair<
             poly::string_view,
-            std::map<size_t, std::pair<poly::string_view, poly::string_view>>>
+            std::map<
+                    std::string,
+                    std::pair<poly::string_view, poly::string_view>>>
     getLatestTrace();
 
     // ***************************************************
     // Overridden functions from CompressIntrospectionHooks
     // ***************************************************
+    void on_segmenterEncode_start(ZL_Segmenter* segCtx) override;
+    void on_segmenterEncode_end(ZL_Segmenter* segCtx, ZL_Report r) override;
+    void on_ZL_Segmenter_processChunk_start(
+            ZL_Segmenter* segCtx,
+            const size_t numElts[],
+            size_t numInputs,
+            ZL_GraphID startingGraphID,
+            const ZL_RuntimeGraphParameters* rGraphParams) override;
+
+    void on_ZL_Segmenter_processChunk_end(ZL_Segmenter* segCtx, ZL_Report r)
+            override;
+
     void on_codecEncode_start(
             ZL_Encoder* encoder,
             const ZL_Compressor* compressor,
@@ -85,7 +102,7 @@ class CompressionTraceHooks : public openzl::CompressIntrospectionHooks {
             const ZL_LocalParams* lparams) override;
 
     void on_ZL_CCtx_compressMultiTypedRef_start(
-            ZL_CCtx const* const cctx,
+            ZL_CCtx* cctx,
             void const* const dst,
             size_t const dstCapacity,
             ZL_TypedRef const* const inputs[],
@@ -96,13 +113,15 @@ class CompressionTraceHooks : public openzl::CompressIntrospectionHooks {
 
    private:
     std::stringstream outStream_; // output stream to write to
-    std::map<size_t, std::pair<std::string, std::string>>
-            latestStreamdumpCache_; // cache for latest streamdumps. Key is the
-                                    // stream ID, value is a pair of strings
-                                    // (content, string lengths (or ""))
+    std::vector<std::vector<StreamdumpEntry>>
+            latestStreamdumpCache_; // cache for latest streamdumps. Key
+                                    // is the stream ID, value is a pair
+                                    // of strings (content, string
+                                    // lengths (or ""))
     std::string latestTraceCache_;  // cache for latest trace
 
-    std::unique_ptr<Tracer>
+    bool showStreamPreview_ = true;
+    std::unique_ptr<CompressTracer>
             tracer_; // pointer to the actual class that does a trace
 };
 } // namespace openzl::visualizer

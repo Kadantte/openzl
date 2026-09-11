@@ -88,12 +88,14 @@ struct ZL_Graph_s {
     RTGraph* rtgraph; /**< Runtime graph for querying stream IDs */
     const ZL_FunctionGraphDesc* dgd; /**< Graph descriptor */
     const void* privateParam;        /**< Private parameters for the graph */
+    ZL_GraphID graphid;              /**< Graph id of the graph */
     VECTOR(DG_StreamCtx)
     streamCtxs; /**< Stream contexts created by this graph */
     VECTOR(DestGraphDesc) dstGraphDescs; /**< Destination graph descriptors */
     VECTOR(RTStreamID)
     rtsids;           /**< Runtime stream IDs for destination routing */
     ZL_Report status; /**< Error status during graph execution */
+    unsigned depth;   /**< Current graph execution depth */
 
     /** @name Memory Allocators
      *  Allocators with specified lifetime durations

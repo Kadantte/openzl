@@ -4,6 +4,7 @@
 
 #include "openzl/cpp/codecs/ACE.hpp"              // IWYU pragma: export
 #include "openzl/cpp/codecs/Bitpack.hpp"          // IWYU pragma: export
+#include "openzl/cpp/codecs/Bitsplit.hpp"         // IWYU pragma: export
 #include "openzl/cpp/codecs/Bitunpack.hpp"        // IWYU pragma: export
 #include "openzl/cpp/codecs/BruteForce.hpp"       // IWYU pragma: export
 #include "openzl/cpp/codecs/Compress.hpp"         // IWYU pragma: export
@@ -19,16 +20,25 @@
 #include "openzl/cpp/codecs/Flatpack.hpp"         // IWYU pragma: export
 #include "openzl/cpp/codecs/FloatDeconstruct.hpp" // IWYU pragma: export
 #include "openzl/cpp/codecs/Illegal.hpp"          // IWYU pragma: export
+#include "openzl/cpp/codecs/Lz.hpp"               // IWYU pragma: export
+#include "openzl/cpp/codecs/Lz4.hpp"              // IWYU pragma: export
 #include "openzl/cpp/codecs/MergeSorted.hpp"      // IWYU pragma: export
+#include "openzl/cpp/codecs/MuxLengths.hpp"       // IWYU pragma: export
 #include "openzl/cpp/codecs/ParseInt.hpp"         // IWYU pragma: export
+#include "openzl/cpp/codecs/Partition.hpp"        // IWYU pragma: export
 #include "openzl/cpp/codecs/Prefix.hpp"           // IWYU pragma: export
 #include "openzl/cpp/codecs/Quantize.hpp"         // IWYU pragma: export
 #include "openzl/cpp/codecs/RangePack.hpp"        // IWYU pragma: export
 #include "openzl/cpp/codecs/SDDL.hpp"             // IWYU pragma: export
+#include "openzl/cpp/codecs/SDDL2.hpp"            // IWYU pragma: export
+#include "openzl/cpp/codecs/SegmentSerial.hpp"    // IWYU pragma: export
+#include "openzl/cpp/codecs/Sentinel.hpp"         // IWYU pragma: export
+#include "openzl/cpp/codecs/SparseNum.hpp"        // IWYU pragma: export
 #include "openzl/cpp/codecs/Split.hpp"            // IWYU pragma: export
 #include "openzl/cpp/codecs/SplitByStruct.hpp"    // IWYU pragma: export
 #include "openzl/cpp/codecs/Store.hpp"            // IWYU pragma: export
 #include "openzl/cpp/codecs/Tokenize.hpp"         // IWYU pragma: export
+#include "openzl/cpp/codecs/Transformer.hpp"      // IWYU pragma: export
 #include "openzl/cpp/codecs/Transpose.hpp"        // IWYU pragma: export
 #include "openzl/cpp/codecs/Zigzag.hpp"           // IWYU pragma: export
 #include "openzl/cpp/codecs/Zstd.hpp"             // IWYU pragma: export

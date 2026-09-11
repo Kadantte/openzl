@@ -20,6 +20,18 @@ class DecoderState {
             poly::span<const ZL_Input*> singletonInputs,
             poly::span<const ZL_Input*> variableInputs);
 
+    DecoderState(const DecoderState&)            = delete;
+    DecoderState& operator=(const DecoderState&) = delete;
+
+    ZL_Decoder* get()
+    {
+        return decoder_;
+    }
+    const ZL_Decoder* get() const
+    {
+        return decoder_;
+    }
+
     poly::span<const InputRef> singletonInputs() const
     {
         return singletonInputs_;
@@ -62,7 +74,7 @@ class CustomDecoder {
 
     static void registerCustomDecoder(
             DCtx& dctx,
-            std::shared_ptr<CustomDecoder> decoder);
+            std::shared_ptr<const CustomDecoder> decoder);
 };
 
 } // namespace openzl

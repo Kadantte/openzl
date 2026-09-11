@@ -8,16 +8,18 @@
 
 #include "openzl/cpp/Compressor.hpp"
 
+#include "tools/io/InputFile.h"
 #include "tools/io/InputSetBuilder.h"
 #include "tools/io/OutputFile.h"
 #include "tools/training/utils/utils.h"
 
 #include "cli/args/ArgsUtils.h"
 #include "cli/args/GlobalArgs.h"
+#include "cli/utils/util.h"
 
 namespace openzl::cli {
 
-struct BenchmarkArgs : public GlobalArgs {
+struct BenchmarkArgs : public GlobalArgs, public ProfileArgs {
     static void addArgs(arg::ArgParser& parser)
     {
         // Add the command
@@ -30,15 +32,7 @@ struct BenchmarkArgs : public GlobalArgs {
                 kOutputCsv,
                 0,
                 true,
-                "Output file path for CSV-formatted sumamry statistic.");
-        parser.addCommandFlag(
-                cmd(), kProfile, 'p', true, "Benchmark the given profile.");
-        parser.addCommandFlag(
-                cmd(),
-                kProfileArg,
-                0,
-                true,
-                "Pass the given value as an argument to constructing the profile.");
+                "Output file path for CSV-formatted summary statistic.");
         parser.addCommandFlag(
                 cmd(),
                 kCompressor,
@@ -51,7 +45,8 @@ struct BenchmarkArgs : public GlobalArgs {
                 kLevel,
                 'l',
                 true,
-                "Benchmark the given compression level.");
+                "Compression level (default: 6; higher favors compression "
+                "ratio).");
         parser.addCommandFlag(
                 cmd(), kNumIters, 'n', true, "Number of benchmark iterations.");
         parser.addCommandFlag(
@@ -60,14 +55,30 @@ struct BenchmarkArgs : public GlobalArgs {
                 0,
                 false,
                 "Enforce strict mode compression. This will fail the compression in cases of errors, instead of falling back.");
+        parser.addCommandFlag(
+                cmd(),
+                kDictBundle,
+                'D',
+                true,
+                "Path to a fat dict bundle (.zd) file to load for benchmarking.");
     }
 
-    explicit BenchmarkArgs(const arg::ParsedArgs& parsed) : GlobalArgs(parsed)
+    explicit BenchmarkArgs(const arg::ParsedArgs& parsed)
+            : GlobalArgs(parsed), ProfileArgs(parsed)
     {
-        compressor = createCompressorFromArgs(
-                parsed.cmdFlag(cmd(), kProfile),
-                parsed.cmdFlag(cmd(), kProfileArg),
-                parsed.cmdFlag(cmd(), kCompressor));
+        // Create the compressor
+        auto dictBundlePath = parsed.cmdFlag(cmd(), kDictBundle);
+        if (dictBundlePath) {
+            tools::io::InputFile bundleInput(dictBundlePath.value());
+            dictBundleData = bundleInput.contents();
+        }
+        auto levelArg = parsed.cmdFlag(cmd(), kLevel);
+        if (levelArg) {
+            level = util::checkedstoiExact(levelArg.value());
+            setRequestedCompressionLevel(level.value());
+        }
+        setCompressor(createCompressorFromArgs(
+                *this, parsed.cmdFlag(cmd(), kCompressor), dictBundleData));
         auto inputPath = parsed.cmdPositional(Cmd::BENCHMARK, kInput);
 
         auto input_set = tools::io::InputSetBuilder(recursive)
@@ -81,19 +92,17 @@ struct BenchmarkArgs : public GlobalArgs {
             outputCsv = std::make_unique<tools::io::OutputFile>(
                     std::move(outputCsvPath).value());
         }
-        auto levelArg = parsed.cmdFlag(cmd(), kLevel);
-        if (levelArg) {
-            level = std::stoi(levelArg.value());
-        }
         auto numItersArg = parsed.cmdFlag(cmd(), kNumIters);
         if (numItersArg) {
-            numIters = std::stoi(numItersArg.value());
+            numIters = util::checkedstoi(numItersArg.value());
         }
         strict = parsed.cmdHasFlag(Cmd::BENCHMARK, kStrict);
     }
 
-    explicit BenchmarkArgs(const GlobalArgs& globalArgs)
-            : GlobalArgs(globalArgs)
+    explicit BenchmarkArgs(
+            const GlobalArgs& globalArgs,
+            const std::shared_ptr<Compressor>& compressor)
+            : GlobalArgs(globalArgs), ProfileArgs(compressor)
     {
     }
 
@@ -101,8 +110,6 @@ struct BenchmarkArgs : public GlobalArgs {
     {
         return Cmd::BENCHMARK;
     }
-
-    std::shared_ptr<Compressor> compressor;
 
     std::vector<training::MultiInput> inputs;
     std::unique_ptr<tools::io::Output> outputCsv;
@@ -112,17 +119,17 @@ struct BenchmarkArgs : public GlobalArgs {
     size_t numIters = 10;
     bool strict     = false;
 
-   private:
-    inline static const std::string kInput     = "input";
-    inline static const std::string kOutputCsv = "output-csv";
+    std::string dictBundleData;
 
-    inline static const std::string kProfile    = "profile";
-    inline static const std::string kProfileArg = "profile-arg";
+   private:
+    inline static const std::string kInput      = "input";
+    inline static const std::string kOutputCsv  = "output-csv";
     inline static const std::string kCompressor = "compressor";
 
-    inline static const std::string kLevel    = "level";
-    inline static const std::string kStrict   = "strict";
-    inline static const std::string kNumIters = "num-iters";
+    inline static const std::string kLevel      = "level";
+    inline static const std::string kStrict     = "strict";
+    inline static const std::string kNumIters   = "num-iters";
+    inline static const std::string kDictBundle = "dict-bundle";
 };
 
 } // namespace openzl::cli

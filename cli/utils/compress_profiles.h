@@ -8,15 +8,87 @@
 #include <string>
 #include <vector>
 
+#include "openzl/cpp/Compressor.hpp"
+#include "openzl/cpp/poly/Optional.hpp"
+
 #include "openzl/zl_compressor.h"
+#include "tools/arg/arg_parser.h"
+#include "tools/arg/parsed_args.h"
 
 namespace openzl::cli {
 
-struct ProfileArgs {
-    std::string name;
+class ProfileArgs {
+   public:
+    static void addArgs(arg::ArgParser& parser);
 
+    explicit ProfileArgs(const arg::ParsedArgs& parsed);
+
+    explicit ProfileArgs(const std::shared_ptr<Compressor>& compressor)
+            : compressor_(compressor)
+    {
+    }
+
+    const poly::optional<size_t>& chunkSize() const
+    {
+        return chunkSize_;
+    }
+
+    const poly::optional<int>& requestedCompressionLevel() const
+    {
+        return requestedCompressionLevel_;
+    }
+
+    void setRequestedCompressionLevel(int compressionLevel)
+    {
+        requestedCompressionLevel_ = compressionLevel;
+    }
+
+    const poly::optional<std::string>& name() const
+    {
+        return name_;
+    }
+
+    const std::map<std::string, std::string>& map() const
+    {
+        return argmap_;
+    }
+
+    // CLI log level (0=NOTHING .. 3=INFO (default) .. 7=EVERYTHING), mirroring
+    // GlobalArgs::verbosity. Profiles that drive a sub-tool with its own log
+    // level (e.g. the SDDL2 compiler) map this onto that tool's scale.
+    int verbosityLevel() const
+    {
+        return verbosityLevel_;
+    }
+
+    void setVerbosityLevel(int verbosityLevel)
+    {
+        verbosityLevel_ = verbosityLevel;
+    }
+
+    const std::shared_ptr<Compressor>& compressor() const
+    {
+        return compressor_;
+    }
+
+    void setCompressor(const std::shared_ptr<Compressor>& compressor)
+    {
+        compressor_ = compressor;
+    }
+
+   private:
+    std::shared_ptr<Compressor> compressor_;
+
+    inline static const std::string kProfileArg = "profile-arg";
+    inline static const std::string kChunkSize  = "chunk-size";
+    inline static const std::string kProfile    = "profile";
+
+    poly::optional<std::string> name_;
+    poly::optional<size_t> chunkSize_;
+    poly::optional<int> requestedCompressionLevel_;
+    int verbosityLevel_{ 3 };
     // Arbitrary (K,V) arguments provided on the command line.
-    std::map<std::string, std::string> argmap;
+    std::map<std::string, std::string> argmap_;
 };
 
 class CompressProfile {
@@ -29,11 +101,13 @@ class CompressProfile {
             const std::string& name_,
             const std::string& description_,
             GenFunc gen_,
-            std::shared_ptr<void> opaque_ = nullptr)
+            std::shared_ptr<void> opaque_ = nullptr,
+            bool supportsChunkSize_       = false)
             : name(name_),
               description(description_),
               gen(std::move(gen_)),
-              opaque(opaque_)
+              opaque(opaque_),
+              supportsChunkSize(supportsChunkSize_)
     {
     }
 
@@ -42,8 +116,9 @@ class CompressProfile {
     std::string name;
     std::string description; // useful for documentation as well as printing
     GenFunc gen;
-    std::shared_ptr<void> opaque; // an optional opaque helper pointer that's
-                                  // passed to the gen function
+    std::shared_ptr<void> opaque; // an optional opaque helper pointer
+                                  // that's passed to the gen function
+    bool supportsChunkSize = false;
 };
 
 const std::map<std::string, std::shared_ptr<CompressProfile>>&

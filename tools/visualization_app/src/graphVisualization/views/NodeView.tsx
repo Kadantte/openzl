@@ -3,6 +3,7 @@
 import {useState} from 'react';
 import {Handle, Position} from '@xyflow/react';
 import {InternalCodecNode} from '../models/InternalCodecNode';
+import type {RF_nodeId} from '../models/types';
 import {GraphNodeView} from './GraphView';
 import {renderLocalParams} from './LocalParamsView';
 import {LocalParamsPopover} from './LocalParamsView';
@@ -13,12 +14,14 @@ import {Box} from '@chakra-ui/react/box';
 import {Portal} from '@chakra-ui/react/portal';
 import {ScrollablePopover} from './ScrollablePopover';
 import {EdgeView} from './EdgeView';
+import {SegmenterNode} from './SegmenterView';
 
 interface NodeViewProps {
   data: {
     internalNode: InternalCodecNode;
     onToggleCollapse: (node: InternalCodecNode) => void;
     expandOneLevel: (node: InternalCodecNode) => void;
+    onCtrlClick?: (nodeId: RF_nodeId) => void;
   };
 }
 
@@ -87,8 +90,16 @@ export function CodecNode({data}: NodeViewProps) {
   }
   return (
     <div
-      className={`codec-node ${codec.isCollapsed ? 'collapsed' : ''} ${codec.name === 'zl.store' || codec.name === 'zl.#start' ? 'special-node' : ''}`}
-      style={codec.inLargestCompressionPath ? {border: '7px solid #2ed78b'} : {}}>
+      className={`codec-node ${codec.isCollapsed ? 'collapsed' : ''} ${
+        codec.name === 'zl.store' || codec.name === 'zl.#start' ? 'special-node' : ''
+      }`}
+      style={codec.inLargestCompressionPath ? {border: '7px solid #2ed78b'} : {}}
+      onClick={(e) => {
+        if ((e.ctrlKey || e.metaKey) && data.onCtrlClick) {
+          e.stopPropagation();
+          data.onCtrlClick(codec.rfid);
+        }
+      }}>
       {/* Input edge handle declaration for a node*/}
       <Handle type="target" position={Position.Top} id="target" style={{background: '#555'}} />
       {codec.cLocalParams.hasLocalParams() && <LocalParamsPopover localParams={codec.cLocalParams} />}
@@ -131,5 +142,6 @@ export function CodecNode({data}: NodeViewProps) {
 export const nodeTypes = {
   codec: CodecNode,
   graph: GraphNodeView,
+  segmenter: SegmenterNode,
   edge: EdgeView,
 };

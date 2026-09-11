@@ -18,6 +18,8 @@ size_t constexpr maxStrLen(double)
 
 class StreamAppender {
    public:
+    using value_type = char;
+
     explicit StreamAppender(ZL_Output* stream)
             : buffer_((char*)ZL_Output_ptr(stream))
     {
@@ -27,6 +29,11 @@ class StreamAppender {
     {
         std::memcpy(buffer_ + idx_, ptr, length);
         idx_ += length;
+    }
+
+    void append(std::string_view sv)
+    {
+        append(sv.data(), sv.size());
     }
 
     void push_back(char c)
@@ -42,7 +49,7 @@ class StreamAppender {
     }
 
    private:
-    char* buffer_;
+    char* buffer_{ nullptr };
     size_t idx_{ 0 };
     size_t prev_{ 0 };
 };
@@ -59,21 +66,22 @@ namespace {
 template <typename T>
 ZL_Report parseDecode(ZL_Decoder* dictx, ZL_Input const* inputs[]) noexcept
 {
+    ZL_RESULT_DECLARE_SCOPE_REPORT(dictx);
     ZL_Input const* numbers          = inputs[0];
     ZL_Input const* exceptionIndices = inputs[1];
     ZL_Input const* exceptions       = inputs[2];
 
-    ZL_RET_R_IF_NE(
-            corruption,
+    ZL_ERR_IF_NE(
             ZL_Input_numElts(exceptionIndices),
-            ZL_Input_numElts(exceptions));
-    ZL_RET_R_IF_NE(corruption, ZL_Input_eltWidth(exceptionIndices), 4);
-    ZL_RET_R_IF_NE(corruption, ZL_Input_eltWidth(numbers), sizeof(T));
+            ZL_Input_numElts(exceptions),
+            corruption);
+    ZL_ERR_IF_NE(ZL_Input_eltWidth(exceptionIndices), 4, corruption);
+    ZL_ERR_IF_NE(ZL_Input_eltWidth(numbers), sizeof(T), corruption);
 
     size_t const outBound = ZL_Input_contentSize(exceptions)
             + ZL_Input_numElts(numbers) * maxStrLen(T{});
     ZL_Output* outStream = ZL_Decoder_create1OutStream(dictx, outBound, 1);
-    ZL_RET_R_IF_NULL(allocation, outStream);
+    ZL_ERR_IF_NULL(outStream, allocation);
 
     StreamAppender outAppender{ outStream };
 
@@ -81,7 +89,7 @@ ZL_Report parseDecode(ZL_Decoder* dictx, ZL_Input const* inputs[]) noexcept
             ZL_Input_numElts(numbers) + ZL_Input_numElts(exceptions);
 
     uint32_t* fieldSizes = ZL_Output_reserveStringLens(outStream, nbElts);
-    ZL_RET_R_IF_NULL(allocation, fieldSizes);
+    ZL_ERR_IF_NULL(fieldSizes, allocation);
 
     auto nums          = (T const*)ZL_Input_ptr(numbers);
     auto const numsEnd = nums + ZL_Input_numElts(numbers);
@@ -99,16 +107,16 @@ ZL_Report parseDecode(ZL_Decoder* dictx, ZL_Input const* inputs[]) noexcept
             outAppender.append(exData, exSize);
             exData += exSize;
         } else {
-            ZL_RET_R_IF_EQ(srcSize_tooSmall, nums, numsEnd);
+            ZL_ERR_IF_EQ(nums, numsEnd, srcSize_tooSmall);
             folly::toAppend(*nums++, &outAppender);
         }
         fieldSizes[i] = outAppender.commitField();
     }
 
-    ZL_RET_R_IF_NE(corruption, nums, numsEnd);
-    ZL_RET_R_IF_NE(corruption, exIdxs, exIdxsEnd);
+    ZL_ERR_IF_NE(nums, numsEnd, corruption);
+    ZL_ERR_IF_NE(exIdxs, exIdxsEnd, corruption);
 
-    ZL_RET_R_IF_ERR(ZL_Output_commit(outStream, nbElts));
+    ZL_ERR_IF_ERR(ZL_Output_commit(outStream, nbElts));
 
     return ZL_returnSuccess();
 }

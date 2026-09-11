@@ -2,8 +2,6 @@
 
 #include "openzl/codecs/entropy/encode_entropy_binding.h"
 
-#include <limits.h>
-
 #define FSE_STATIC_LINKING_ONLY
 #define HUF_STATIC_LINKING_ONLY
 
@@ -12,8 +10,6 @@
 #include "openzl/codecs/entropy/encode_entropy_selector.h"
 #include "openzl/codecs/entropy/encode_huffman_kernel.h"
 #include "openzl/common/assertion.h"
-#include "openzl/common/errors_internal.h" // ZS2_RET_IF*
-#include "openzl/compress/enc_interface.h"
 #include "openzl/compress/private_nodes.h"
 #include "openzl/fse/fse.h"
 #include "openzl/fse/huf.h"
@@ -26,7 +22,8 @@
 #include "openzl/zl_data.h"
 #include "openzl/zl_graph_api.h"
 
-#define ENTROPY_HISTORAM_PID 246
+typedef const HUF_CElt* HufCTable;
+ZL_RESULT_DECLARE_TYPE(HufCTable);
 
 static ZL_Histogram const* getHistogram(ZL_Encoder* eictx, const ZL_Input* in)
 {
@@ -50,8 +47,72 @@ static ZL_Histogram const* getHistogram(ZL_Encoder* eictx, const ZL_Input* in)
     return histogram;
 }
 
+static ZL_Report buildHufCTable(HUF_CElt* ctable, const ZL_Histogram* histogram)
+{
+    ZL_RESULT_DECLARE_SCOPE_REPORT(NULL);
+    ZL_ASSERT_NE(histogram->maxSymbol, 0, "Must've already ruled out constant");
+    size_t tableLog = HUF_optimalTableLog(
+            HUF_TABLELOG_DEFAULT, histogram->total, histogram->maxSymbol);
+    tableLog = HUF_buildCTable(
+            ctable, histogram->count, histogram->maxSymbol, (unsigned)tableLog);
+    ZL_ERR_IF(HUF_isError(tableLog), GENERIC);
+    return ZL_returnSuccess();
+}
+
+static ZL_RESULT_OF(HufCTable)
+        getHufCTable(ZL_Encoder* encoder, const ZL_Histogram* histogram)
+{
+    ZL_RESULT_DECLARE_SCOPE(HufCTable, encoder);
+    ZL_RefParam param =
+            ZL_Encoder_getLocalParam(encoder, ENTROPY_HUF_CTABLE_PID);
+    if (param.paramRef != NULL) {
+        return ZL_RESULT_WRAP_VALUE(HufCTable, param.paramRef);
+    }
+
+    HUF_CElt* ctable = ZL_Encoder_getScratchSpace(
+            encoder, HUF_CTABLE_SIZE(histogram->maxSymbol));
+    ZL_ERR_IF_NULL(ctable, allocation);
+    ZL_ERR_IF_ERR(buildHufCTable(ctable, histogram));
+
+    return ZL_RESULT_WRAP_VALUE(HufCTable, ctable);
+}
+
+static size_t estimateHuffmanSize(
+        HufCTable ctable,
+        const ZL_Histogram* histogram)
+{
+    const size_t symbolsSize = ZS_HUF_estimateCompressedSize(
+            ctable, histogram->count, histogram->maxSymbol);
+
+    // Account for Huffman header + jump table in X4 mode.
+    size_t const headerSize = 1
+            + (size_t)(ZL_nextPow2(histogram->total + 1) + 7) / 8
+            + (histogram->total >= 256 ? 6 : 0);
+
+    // TODO(T267366720): Update this code to match the new header cost when
+    // switching away from bitpack. The old estimate was the minimum of
+    // 4-bits per symbol or 5-bits per non-zero symbol. With bitpack it is
+    // just 4-bits per symbol.
+    const size_t tableBits = 4u * (histogram->maxSymbol + 1u);
+    const size_t tableSize = (tableBits + 7u) / 8u;
+    return headerSize + tableSize + symbolsSize;
+}
+
+static size_t estimateFseSize(DataStatsU8* stats)
+{
+    const double entropy = DataStatsU8_getEntropy(stats);
+    const size_t symbolBits =
+            (size_t)(entropy * (double)DataStatsU8_totalElements(stats));
+
+    // Estimate header as 10-bits per non-zero symbol
+    const size_t headerBits = 10 * DataStatsU8_getCardinality(stats);
+
+    return (headerBits + symbolBits + 7) / 8;
+}
+
 ZL_Report EI_fse_v2(ZL_Encoder* eictx, const ZL_Input* ins[], size_t nbIns)
 {
+    ZL_RESULT_DECLARE_SCOPE_REPORT(eictx);
     ZL_ASSERT_EQ(nbIns, 1);
     ZL_ASSERT_NN(ins);
     const ZL_Input* in = ins[0];
@@ -60,15 +121,15 @@ ZL_Report EI_fse_v2(ZL_Encoder* eictx, const ZL_Input* ins[], size_t nbIns)
     size_t const srcSize          = ZL_Input_numElts(in);
     ZL_Histogram const* histogram = getHistogram(eictx, in);
 
-    ZL_RET_R_IF_LT(
-            node_invalid_input,
+    ZL_ERR_IF_LT(
             srcSize,
             2,
-            "Must not use FSE for 0 or 1 element (should be impossible for users to trigger)");
-    ZL_RET_R_IF_EQ(
             node_invalid_input,
+            "Must not use FSE for 0 or 1 element (should be impossible for users to trigger)");
+    ZL_ERR_IF_EQ(
             histogram->count[histogram->maxSymbol],
             histogram->total,
+            node_invalid_input,
             "Must not use FSE on constant data (should be impossible for users to trigger)");
 
     // 1. Decide on number of states & send header
@@ -88,39 +149,39 @@ ZL_Report EI_fse_v2(ZL_Encoder* eictx, const ZL_Input* ins[], size_t nbIns)
         size_t const normSize = histogram->maxSymbol + 1;
         ZL_Output* const normStream =
                 ZL_Encoder_createTypedStream(eictx, 0, normSize, 2);
-        ZL_RET_R_IF_NULL(allocation, normStream);
+        ZL_ERR_IF_NULL(normStream, allocation);
         int16_t* const normCount = ZL_Output_ptr(normStream);
 
         unsigned const tableLog = FSE_optimalTableLog(
                 FSE_DEFAULT_TABLELOG, srcSize, histogram->maxSymbol);
         ctable = ZL_Encoder_getScratchSpace(
                 eictx, FSE_CTABLE_SIZE(tableLog, histogram->maxSymbol));
-        ZL_RET_R_IF_NULL(allocation, ctable);
+        ZL_ERR_IF_NULL(ctable, allocation);
 
-        ZL_RET_R_IF(
-                GENERIC,
+        ZL_ERR_IF(
                 FSE_isError(FSE_normalizeCount(
                         normCount,
                         tableLog,
                         histogram->count,
                         srcSize,
                         histogram->maxSymbol,
-                        true)));
+                        true)),
+                GENERIC);
 
-        ZL_RET_R_IF(
-                GENERIC,
+        ZL_ERR_IF(
                 FSE_isError(FSE_buildCTable(
-                        ctable, normCount, histogram->maxSymbol, tableLog)));
+                        ctable, normCount, histogram->maxSymbol, tableLog)),
+                GENERIC);
 
-        ZL_RET_R_IF_ERR(ZL_Output_setIntMetadata(normStream, 0, (int)tableLog));
-        ZL_RET_R_IF_ERR(ZL_Output_commit(normStream, normSize));
+        ZL_ERR_IF_ERR(ZL_Output_setIntMetadata(normStream, 0, (int)tableLog));
+        ZL_ERR_IF_ERR(ZL_Output_commit(normStream, normSize));
     }
 
     // 3. Encode
     size_t const bitCapacity = FSE_compressBound(srcSize);
     ZL_Output* bitStream =
             ZL_Encoder_createTypedStream(eictx, 1, bitCapacity, 1);
-    ZL_RET_R_IF_NULL(allocation, bitStream);
+    ZL_ERR_IF_NULL(bitStream, allocation);
 
     size_t const bitSize = FSE_compress_usingCTable(
             ZL_Output_ptr(bitStream),
@@ -129,31 +190,32 @@ ZL_Report EI_fse_v2(ZL_Encoder* eictx, const ZL_Input* ins[], size_t nbIns)
             srcSize,
             ctable,
             nbStates);
-    ZL_RET_R_IF(node_invalid_input, FSE_isError(bitSize));
-    ZL_RET_R_IF_EQ(
-            node_invalid_input,
+    ZL_ERR_IF(FSE_isError(bitSize), node_invalid_input);
+    ZL_ERR_IF_EQ(
             bitSize,
             0,
+            node_invalid_input,
             "FSE source is not compressible (should be impossible to trigger for user)");
-    ZL_RET_R_IF_ERR(ZL_Output_commit(bitStream, bitSize));
+    ZL_ERR_IF_ERR(ZL_Output_commit(bitStream, bitSize));
 
     return ZL_returnSuccess();
 }
 
 ZL_Report EI_fse_ncount(ZL_Encoder* eictx, const ZL_Input* ins[], size_t nbIns)
 {
+    ZL_RESULT_DECLARE_SCOPE_REPORT(eictx);
     ZL_ASSERT_EQ(nbIns, 1);
     ZL_ASSERT_NN(ins);
     const ZL_Input* in = ins[0];
     ZL_ASSERT(ZL_Input_type(in) == ZL_Type_numeric);
-    ZL_RET_R_IF_NE(node_invalid_input, ZL_Input_eltWidth(in), 2);
+    ZL_ERR_IF_NE(ZL_Input_eltWidth(in), 2, node_invalid_input);
 
     short const* const ncount = ZL_Input_ptr(in);
     size_t const nbCounts     = ZL_Input_numElts(in);
 
-    ZL_RET_R_IF_EQ(node_invalid_input, nbCounts, 0);
-    ZL_RET_R_IF_GT(node_invalid_input, nbCounts, 256);
-    ZL_RET_R_IF_EQ(node_invalid_input, ncount[nbCounts - 1], 0);
+    ZL_ERR_IF_EQ(nbCounts, 0, node_invalid_input);
+    ZL_ERR_IF_GT(nbCounts, 256, node_invalid_input);
+    ZL_ERR_IF_EQ(ncount[nbCounts - 1], 0, node_invalid_input);
 
     bool invalid = false;
     uint64_t sum = 0;
@@ -161,17 +223,17 @@ ZL_Report EI_fse_ncount(ZL_Encoder* eictx, const ZL_Input* ins[], size_t nbIns)
         sum += ncount[i] == -1 ? (uint64_t)1 : (uint64_t)ncount[i];
         invalid |= ncount[i] < -1;
     }
-    ZL_RET_R_IF(node_invalid_input, invalid, "Ncount must not be less than -1");
-    ZL_RET_R_IF_NOT(node_invalid_input, ZL_isPow2(sum));
-    ZL_RET_R_IF_EQ(node_invalid_input, sum, 0);
+    ZL_ERR_IF(invalid, node_invalid_input, "Ncount must not be less than -1");
+    ZL_ERR_IF_NOT(ZL_isPow2(sum), node_invalid_input);
+    ZL_ERR_IF_EQ(sum, 0, node_invalid_input);
     unsigned const tableLog = (unsigned)ZL_highbit64(sum);
 
-    ZL_RET_R_IF_LT(node_invalid_input, tableLog, FSE_MIN_TABLELOG);
-    ZL_RET_R_IF_GT(node_invalid_input, tableLog, FSE_MAX_TABLELOG);
+    ZL_ERR_IF_LT(tableLog, FSE_MIN_TABLELOG, node_invalid_input);
+    ZL_ERR_IF_GT(tableLog, FSE_MAX_TABLELOG, node_invalid_input);
 
     ZL_Output* const dstStream =
             ZL_Encoder_createTypedStream(eictx, 0, FSE_NCOUNTBOUND, 1);
-    ZL_RET_R_IF_NULL(allocation, dstStream);
+    ZL_ERR_IF_NULL(dstStream, allocation);
 
     size_t const ncountSize = FSE_writeNCount(
             ZL_Output_ptr(dstStream),
@@ -179,19 +241,20 @@ ZL_Report EI_fse_ncount(ZL_Encoder* eictx, const ZL_Input* ins[], size_t nbIns)
             ncount,
             (unsigned)nbCounts - 1,
             tableLog);
-    ZL_RET_R_IF(
-            GENERIC,
+    ZL_ERR_IF(
             FSE_isError(ncountSize),
+            GENERIC,
             "%s",
             FSE_getErrorName(ncountSize));
 
-    ZL_RET_R_IF_ERR(ZL_Output_commit(dstStream, ncountSize));
+    ZL_ERR_IF_ERR(ZL_Output_commit(dstStream, ncountSize));
 
     return ZL_returnSuccess();
 }
 
 ZL_Report EI_huffman_v2(ZL_Encoder* eictx, const ZL_Input* ins[], size_t nbIns)
 {
+    ZL_RESULT_DECLARE_SCOPE_REPORT(eictx);
     ZL_ASSERT_EQ(nbIns, 1);
     ZL_ASSERT_NN(ins);
     const ZL_Input* in = ins[0];
@@ -200,37 +263,26 @@ ZL_Report EI_huffman_v2(ZL_Encoder* eictx, const ZL_Input* ins[], size_t nbIns)
     size_t const srcSize          = ZL_Input_numElts(in);
     ZL_Histogram const* histogram = getHistogram(eictx, in);
 
-    ZL_RET_R_IF_LT(
-            node_invalid_input,
+    ZL_ERR_IF_LT(
             srcSize,
             2,
-            "Must not use Huffman for 0 or 1 element (should be impossible for users to trigger)");
-    ZL_RET_R_IF_EQ(
             node_invalid_input,
+            "Must not use Huffman for 0 or 1 element (should be impossible for users to trigger)");
+    ZL_ERR_IF_EQ(
             histogram->count[histogram->maxSymbol],
             histogram->total,
+            node_invalid_input,
             "Must not use Huffman on constant data (should be impossible for users to trigger)");
 
     // 1. Build table
-    HUF_CElt* ctable;
+    ZL_TRY_LET(HufCTable, ctable, getHufCTable(eictx, histogram));
     {
         size_t const weightsSize = histogram->maxSymbol + 1;
         ZL_Output* const weightsStream =
                 ZL_Encoder_createTypedStream(eictx, 0, weightsSize, 1);
-        ZL_RET_R_IF_NULL(allocation, weightsStream);
+        ZL_ERR_IF_NULL(weightsStream, allocation);
         uint8_t* const weights = ZL_Output_ptr(weightsStream);
-
-        size_t tableLog = HUF_optimalTableLog(
-                HUF_TABLELOG_DEFAULT, srcSize, histogram->maxSymbol);
-        ctable = ZL_Encoder_getScratchSpace(
-                eictx, HUF_CTABLE_SIZE(histogram->maxSymbol));
-        ZL_RET_R_IF_NULL(allocation, ctable);
-        tableLog = HUF_buildCTable(
-                ctable,
-                histogram->count,
-                histogram->maxSymbol,
-                (unsigned)tableLog);
-        ZL_RET_R_IF(GENERIC, HUF_isError(tableLog));
+        const size_t tableLog  = (size_t)ctable[0];
 
         HUF_CElt const* ct = ctable + 1;
         for (size_t i = 0; i < weightsSize; ++i) {
@@ -240,13 +292,13 @@ ZL_Report EI_huffman_v2(ZL_Encoder* eictx, const ZL_Input* ins[], size_t nbIns)
             ZL_ASSERT_EQ(weights[i] == 0, histogram->count[i] == 0);
         }
 
-        ZL_RET_R_IF_ERR(
+        ZL_ERR_IF_ERR(
                 ZL_Output_setIntMetadata(weightsStream, 0, (int)tableLog));
-        ZL_RET_R_IF_ERR(ZL_Output_commit(weightsStream, weightsSize));
+        ZL_ERR_IF_ERR(ZL_Output_commit(weightsStream, weightsSize));
     }
 
     // 2. Decide on 4x streams & send header
-    bool const x4 = srcSize > 1000;
+    bool const x4 = srcSize >= 256;
     {
         size_t const nbBytes = (size_t)(ZL_nextPow2(srcSize + 1) + 7) / 8;
         uint8_t header[sizeof(uint64_t) + 1];
@@ -260,7 +312,7 @@ ZL_Report EI_huffman_v2(ZL_Encoder* eictx, const ZL_Input* ins[], size_t nbIns)
     size_t const bitCapacity = HUF_compressBound(srcSize);
     ZL_Output* bitStream =
             ZL_Encoder_createTypedStream(eictx, 1, bitCapacity, 1);
-    ZL_RET_R_IF_NULL(allocation, bitStream);
+    ZL_ERR_IF_NULL(bitStream, allocation);
 
     size_t const bitSize = x4 ? HUF_compress4X_usingCTable(
                                         ZL_Output_ptr(bitStream),
@@ -274,13 +326,13 @@ ZL_Report EI_huffman_v2(ZL_Encoder* eictx, const ZL_Input* ins[], size_t nbIns)
                                         src,
                                         srcSize,
                                         ctable);
-    ZL_RET_R_IF(node_invalid_input, HUF_isError(bitSize));
-    ZL_RET_R_IF_EQ(
-            node_invalid_input,
+    ZL_ERR_IF(HUF_isError(bitSize), node_invalid_input);
+    ZL_ERR_IF_EQ(
             bitSize,
             0,
+            node_invalid_input,
             "Huffman source is not compressible (should be impossible to trigger for user)");
-    ZL_RET_R_IF_ERR(ZL_Output_commit(bitStream, bitSize));
+    ZL_ERR_IF_ERR(ZL_Output_commit(bitStream, bitSize));
 
     return ZL_returnSuccess();
 }
@@ -288,25 +340,26 @@ ZL_Report EI_huffman_v2(ZL_Encoder* eictx, const ZL_Input* ins[], size_t nbIns)
 ZL_Report
 EI_huffman_struct_v2(ZL_Encoder* eictx, const ZL_Input* ins[], size_t nbIns)
 {
+    ZL_RESULT_DECLARE_SCOPE_REPORT(eictx);
     ZL_ASSERT_EQ(nbIns, 1);
     ZL_ASSERT_NN(ins);
     const ZL_Input* in = ins[0];
-    ZL_RET_R_IF_NE(node_invalid_input, ZL_Input_eltWidth(in), 2);
+    ZL_ERR_IF_NE(ZL_Input_eltWidth(in), 2, node_invalid_input);
 
     ZL_ASSERT(ZL_Input_type(in) == ZL_Type_struct);
     uint16_t const* src           = ZL_Input_ptr(in);
     size_t const srcSize          = ZL_Input_numElts(in);
     ZL_Histogram const* histogram = getHistogram(eictx, in);
 
-    ZL_RET_R_IF_LT(
-            node_invalid_input,
+    ZL_ERR_IF_LT(
             srcSize,
             2,
-            "Must not use Huffman for 0 or 1 element (should be impossible for users to trigger)");
-    ZL_RET_R_IF_EQ(
             node_invalid_input,
+            "Must not use Huffman for 0 or 1 element (should be impossible for users to trigger)");
+    ZL_ERR_IF_EQ(
             histogram->count[histogram->maxSymbol],
             histogram->total,
+            node_invalid_input,
             "Must not use Huffman on constant data (should be impossible for users to trigger)");
 
     // 1. Build table
@@ -316,15 +369,15 @@ EI_huffman_struct_v2(ZL_Encoder* eictx, const ZL_Input* ins[], size_t nbIns)
         size_t const weightsSize = histogram->maxSymbol + 1;
         ZL_Output* const weightsStream =
                 ZL_Encoder_createTypedStream(eictx, 0, weightsSize, 1);
-        ZL_RET_R_IF_NULL(allocation, weightsStream);
+        ZL_ERR_IF_NULL(weightsStream, allocation);
         uint8_t* const weights = ZL_Output_ptr(weightsStream);
 
         ctable = ZL_Encoder_getScratchSpace(
                 eictx, sizeof(ZS_Huf16CElt) * weightsSize);
-        ZL_RET_R_IF_NULL(allocation, ctable);
+        ZL_ERR_IF_NULL(ctable, allocation);
         ZL_Report tableLogRet = ZS_largeHuffmanBuildCTable(
                 ctable, histogram->count, (uint16_t)histogram->maxSymbol, 0);
-        ZL_RET_R_IF_ERR(tableLogRet);
+        ZL_ERR_IF_ERR(tableLogRet);
         tableLog = (int)ZL_validResult(tableLogRet);
 
         for (size_t i = 0; i < weightsSize; ++i) {
@@ -333,9 +386,9 @@ EI_huffman_struct_v2(ZL_Encoder* eictx, const ZL_Input* ins[], size_t nbIns)
             ZL_ASSERT_EQ(weights[i] == 0, histogram->count[i] == 0);
         }
 
-        ZL_RET_R_IF_ERR(
+        ZL_ERR_IF_ERR(
                 ZL_Output_setIntMetadata(weightsStream, 0, (int)tableLog));
-        ZL_RET_R_IF_ERR(ZL_Output_commit(weightsStream, weightsSize));
+        ZL_ERR_IF_ERR(ZL_Output_commit(weightsStream, weightsSize));
     }
 
     // 2. Decide on 4x streams & send header
@@ -353,7 +406,7 @@ EI_huffman_struct_v2(ZL_Encoder* eictx, const ZL_Input* ins[], size_t nbIns)
     size_t const bitCapacity = 2 * srcSize + 32;
     ZL_Output* bitStream =
             ZL_Encoder_createTypedStream(eictx, 1, bitCapacity, 1);
-    ZL_RET_R_IF_NULL(allocation, bitStream);
+    ZL_ERR_IF_NULL(bitStream, allocation);
 
     ZL_WC bits             = ZL_WC_wrap(ZL_Output_ptr(bitStream), bitCapacity);
     ZL_Report const report = x4
@@ -361,9 +414,9 @@ EI_huffman_struct_v2(ZL_Encoder* eictx, const ZL_Input* ins[], size_t nbIns)
                       &bits, src, srcSize, ctable, tableLog)
             : ZS_largeHuffmanEncodeUsingCTable(
                       &bits, src, srcSize, ctable, tableLog);
-    ZL_RET_R_IF_ERR(report);
+    ZL_ERR_IF_ERR(report);
     ZL_ASSERT_LE(ZL_WC_size(&bits), bitCapacity);
-    ZL_RET_R_IF_ERR(ZL_Output_commit(bitStream, ZL_WC_size(&bits)));
+    ZL_ERR_IF_ERR(ZL_Output_commit(bitStream, ZL_WC_size(&bits)));
 
     return ZL_returnSuccess();
 }
@@ -371,6 +424,7 @@ EI_huffman_struct_v2(ZL_Encoder* eictx, const ZL_Input* ins[], size_t nbIns)
 // ZL_TypedEncoderFn
 ZL_Report EI_fse_typed(ZL_Encoder* eictx, const ZL_Input* ins[], size_t nbIns)
 {
+    ZL_RESULT_DECLARE_SCOPE_REPORT(eictx);
     ZL_ASSERT_EQ(nbIns, 1);
     ZL_ASSERT_NN(ins);
     const ZL_Input* in = ins[0];
@@ -379,14 +433,14 @@ ZL_Report EI_fse_typed(ZL_Encoder* eictx, const ZL_Input* ins[], size_t nbIns)
     ZL_ASSERT(
             ZL_Input_type(in) == ZL_Type_serial
             || ZL_Input_type(in) == ZL_Type_struct);
-    ZL_RET_R_IF_NE(GENERIC, ZL_Input_eltWidth(in), 1);
+    ZL_ERR_IF_NE(ZL_Input_eltWidth(in), 1, GENERIC);
     const void* const src = ZL_Input_ptr(in);
     size_t const srcSize  = ZL_Input_numElts(in);
     size_t const dstCapacity =
             ZS_Entropy_encodedSizeBound(srcSize, /* elementSize */ 1);
     ZL_Output* const out =
             ZL_Encoder_createTypedStream(eictx, 0, dstCapacity, 1);
-    ZL_RET_R_IF_NULL(allocation, out);
+    ZL_ERR_IF_NULL(out, allocation);
     // Starting version 5 we can support more than two states and we send the
     // number of states in the header, otherwise we conform to older versions
     // that only support 2 states.
@@ -400,11 +454,11 @@ ZL_Report EI_fse_typed(ZL_Encoder* eictx, const ZL_Input* ins[], size_t nbIns)
     // ZL_WriteCursor API, it should be updated to no longer depends on this
     // abstraction
     ZL_WriteCursor wc = ZL_WC_wrap(ZL_Output_ptr(out), dstCapacity);
-    ZL_RET_R_IF(
-            GENERIC,
+    ZL_ERR_IF(
             ZL_isError(ZS_Entropy_encodeFse(
-                    &wc, src, srcSize, /* elementSize */ 1, nbStates)));
-    ZL_RET_R_IF_ERR(ZL_Output_commit(out, ZL_WC_size(&wc)));
+                    &wc, src, srcSize, /* elementSize */ 1, nbStates)),
+            GENERIC);
+    ZL_ERR_IF_ERR(ZL_Output_commit(out, ZL_WC_size(&wc)));
     return ZL_returnValue(1);
 }
 
@@ -429,6 +483,7 @@ static void EI_huffman_header(ZL_Encoder* eictx, ZL_Input const* in)
 ZL_Report
 EI_huffman_typed(ZL_Encoder* eictx, const ZL_Input* ins[], size_t nbIns)
 {
+    ZL_RESULT_DECLARE_SCOPE_REPORT(eictx);
     ZL_ASSERT_EQ(nbIns, 1);
     ZL_ASSERT_NN(ins);
     const ZL_Input* in = ins[0];
@@ -442,16 +497,16 @@ EI_huffman_typed(ZL_Encoder* eictx, const ZL_Input* ins[], size_t nbIns)
     size_t const eltWidth = ZL_Input_eltWidth(in);
     size_t const nbElts   = ZL_Input_numElts(in);
 
-    ZL_RET_R_IF_GT(
-            node_invalid_input,
+    ZL_ERR_IF_GT(
             eltWidth,
             2,
+            node_invalid_input,
             "eltWidth > 2 is no longer supported for encoding.");
 
     ZL_ASSERT(
             ZL_Input_type(in) == ZL_Type_serial
             || ZL_Input_type(in) == ZL_Type_struct);
-    ZL_RET_R_IF_GT(GENERIC, eltWidth, 2);
+    ZL_ERR_IF_GT(eltWidth, 2, GENERIC);
 
     //> Tell the entropy compressor to use Huffman, or a raw-bits mode,
     //> and allow block splitting.
@@ -465,20 +520,20 @@ EI_huffman_typed(ZL_Encoder* eictx, const ZL_Input* ins[], size_t nbIns)
     size_t const dstCapacity = ZS_Entropy_encodedSizeBound(nbElts, eltWidth);
     ZL_Output* const out     = ZL_Encoder_createTypedStream(
             eictx, 0, dstCapacity, /* eltWidth */ 1);
-    ZL_RET_R_IF_NULL(allocation, out);
+    ZL_ERR_IF_NULL(out, allocation);
     ZL_WriteCursor wc = ZL_WC_wrap(ZL_Output_ptr(out), dstCapacity);
 
     //> Write our header & encode
     EI_huffman_header(eictx, in);
     if (nbElts > 0) {
-        ZL_RET_R_IF(
-                GENERIC,
-                ZL_isError(ZS_Entropy_encode(
-                        &wc, src, nbElts, eltWidth, &params)));
+        ZL_ERR_IF(
+                ZL_isError(
+                        ZS_Entropy_encode(&wc, src, nbElts, eltWidth, &params)),
+                GENERIC);
     }
 
     //> Tell how large the output stream is.
-    ZL_RET_R_IF_ERR(ZL_Output_commit(out, ZL_WC_size(&wc)));
+    ZL_ERR_IF_ERR(ZL_Output_commit(out, ZL_WC_size(&wc)));
 
     //> Return the number of output streams.
     return ZL_returnValue(1);
@@ -493,6 +548,7 @@ EI_huffman_typed(ZL_Encoder* eictx, const ZL_Input* ins[], size_t nbIns)
 static ZL_RESULT_OF(ZL_EdgeList)
         chunkInputStream(ZL_Graph* gctx, ZL_Edge** sctx)
 {
+    ZL_RESULT_DECLARE_SCOPE(ZL_EdgeList, gctx);
     ZL_Input const* input = ZL_Edge_getData(*sctx);
     size_t const nbElts   = ZL_Input_numElts(input);
     ZL_ASSERT_NE(ZL_Input_type(input) & (ZL_Type_serial | ZL_Type_struct), 0);
@@ -503,13 +559,13 @@ static ZL_RESULT_OF(ZL_EdgeList)
     size_t const kMinSizeToChunk = 100000;
     if (nbElts < kMinSizeToChunk) {
         ZL_EdgeList out = { .edges = sctx, .nbEdges = 1 };
-        return ZL_RESULT_WRAP_VALUE(ZL_EdgeList, out);
+        return ZL_WRAP_VALUE(out);
     }
 
     size_t const nbChunks = (nbElts + kChunkSize - 1) / kChunkSize;
     size_t* chunkSizes =
             ZL_Graph_getScratchSpace(gctx, sizeof(size_t) * nbChunks);
-    ZL_RET_T_IF_NULL(ZL_EdgeList, allocation, chunkSizes);
+    ZL_ERR_IF_NULL(chunkSizes, allocation);
 
     ZL_ASSERT_GE(nbChunks, 1);
     for (size_t i = 0; i < nbChunks - 1; ++i) {
@@ -523,45 +579,98 @@ static ZL_RESULT_OF(ZL_EdgeList)
 typedef enum {
     EBM_huf,
     EBM_fse,
+    EBM_store,
     EBM_any,
 } EntropyBackendMode;
 
-static EntropyBackendMode resolveMode(
+typedef enum {
+    HM_huf0,
+    HM_pivco,
+    HM_any,
+} HuffmanMode;
+
+/// Resolves EBM_any to a concrete mode and returns the entropy compressed
+/// size
+static size_t resolveMode(
         DataStatsU8* stats,
-        EntropyBackendMode mode)
+        const ZL_Histogram* histogram,
+        HufCTable hufCTable,
+        size_t minGain,
+        EntropyBackendMode* mode)
 {
     // TODO: Better selection between Huffman & FSE
     // Take decompression speed into account
-    if (mode == EBM_any) {
-        size_t const nbElts = DataStatsU8_totalElements(stats);
-        size_t const fseSize =
-                (size_t)(DataStatsU8_getEntropy(stats) * (double)nbElts + 7)
-                / 8;
-        size_t const hufSize =
-                DataStatsU8_estimateHuffmanSizeFast(stats, /* delta */ false);
-        size_t const minGain = nbElts / 32;
-        if (fseSize + minGain < hufSize) {
-            return EBM_fse;
-        } else {
-            return EBM_huf;
-        }
+    const size_t nbElts = histogram->total;
+
+    if (nbElts <= 64) {
+        // Don't even attempt entropy compression on tiny inputs
+        *mode = EBM_store;
+        return nbElts;
     }
-    return mode;
+
+    if (*mode == EBM_any) {
+        ZL_ASSERT_NN(hufCTable);
+        const size_t hufSize    = estimateHuffmanSize(hufCTable, histogram);
+        const size_t fseSize    = estimateFseSize(stats);
+        const size_t minFseGain = nbElts / 100;
+        size_t entropySize;
+        if (fseSize + minFseGain <= hufSize) {
+            *mode       = EBM_fse;
+            entropySize = fseSize;
+        } else {
+            *mode       = EBM_huf;
+            entropySize = hufSize;
+        }
+        if (entropySize + minGain <= nbElts) {
+            return entropySize;
+        } else {
+            *mode = EBM_store;
+            return nbElts;
+        }
+    } else if (*mode == EBM_huf) {
+        ZL_ASSERT_NN(hufCTable);
+        const size_t hufSize = estimateHuffmanSize(hufCTable, histogram);
+        if (hufSize + minGain <= nbElts) {
+            return hufSize;
+        } else {
+            *mode = EBM_store;
+            return nbElts;
+        }
+    } else if (*mode == EBM_fse) {
+        ZL_ASSERT_NULL(hufCTable);
+        const size_t fseSize = estimateFseSize(stats);
+        if (fseSize + minGain <= nbElts) {
+            return fseSize;
+        } else {
+            *mode = EBM_store;
+            return nbElts;
+        }
+    } else {
+        ZL_ASSERT_EQ(*mode, EBM_store);
+        return nbElts;
+    }
 }
 
-static ZL_RESULT_OF(ZL_EdgeList) runNode_wHistogram(
+static ZL_RESULT_OF(ZL_EdgeList) runNode_withParams(
         ZL_Edge* sctx,
         ZL_NodeID node,
-        ZL_Histogram const* histogram)
+        ZL_Histogram const* histogram,
+        HufCTable ctable)
 {
-    ZL_RefParam const param = {
-        .paramId  = ENTROPY_HISTORAM_PID,
-        .paramRef = histogram,
+    ZL_RefParam const refParams[2] = {
+        {
+                .paramId  = ENTROPY_HISTORAM_PID,
+                .paramRef = histogram,
+        },
+        {
+                .paramId  = ENTROPY_HUF_CTABLE_PID,
+                .paramRef = ctable,
+        },
     };
     ZL_LocalParams params = {
         .refParams = {
-                .refParams = &param,
-                .nbRefParams = 1,
+                .refParams = refParams,
+                .nbRefParams = 2,
         },
     };
     return ZL_Edge_runNode_withParams(sctx, node, &params);
@@ -571,6 +680,9 @@ static ZL_Histogram* getHistogram8(ZL_Graph* gctx, DataStatsU8* stats)
 {
     ZL_Histogram* histogram = (ZL_Histogram*)ZL_Graph_getScratchSpace(
             gctx, sizeof(ZL_Histogram8));
+    if (histogram == NULL) {
+        return NULL;
+    }
     memcpy(histogram->count,
            DataStatsU8_getHistogram(stats),
            256 * sizeof(uint32_t));
@@ -578,6 +690,7 @@ static ZL_Histogram* getHistogram8(ZL_Graph* gctx, DataStatsU8* stats)
     histogram->maxSymbol    = DataStatsU8_getMaxElt(stats);
     histogram->elementSize  = 1;
     histogram->largestCount = 0;
+    histogram->cardinality  = (unsigned)DataStatsU8_getCardinality(stats);
     for (size_t i = 0; i < histogram->maxSymbol + 1; ++i) {
         histogram->largestCount =
                 ZL_MAX(histogram->count[i], histogram->largestCount);
@@ -587,22 +700,68 @@ static ZL_Histogram* getHistogram8(ZL_Graph* gctx, DataStatsU8* stats)
 
 static ZL_Report runBitpack(ZL_Edge* input)
 {
-    ZL_TRY_LET_T(
+    ZL_RESULT_DECLARE_SCOPE_REPORT(NULL);
+    ZL_TRY_LET(
             ZL_EdgeList,
             streams,
             ZL_Edge_runNode(input, ZL_NODE_INTERPRET_TOKEN_AS_LE));
     ZL_ASSERT_EQ(streams.nbEdges, 1);
-    ZL_RET_R_IF_ERR(ZL_Edge_setDestination(streams.edges[0], ZL_GRAPH_BITPACK));
+    ZL_ERR_IF_ERR(ZL_Edge_setDestination(streams.edges[0], ZL_GRAPH_BITPACK));
     return ZL_returnSuccess();
+}
+
+static size_t getMinGainBytes(const ZL_Graph* graph, size_t contentSize)
+{
+    const size_t kDefaultMinGainBytes = 32;
+    const size_t kDefaultMinGainPct   = 1;
+
+    ZL_IntParam param =
+            ZL_Graph_getLocalIntParam(graph, ZL_ENTROPY_MIN_GAIN_BYTES_PID);
+    size_t minGainBytes = kDefaultMinGainBytes;
+    if (param.paramId != ZL_LP_INVALID_PARAMID) {
+        minGainBytes = (size_t)ZL_MAX(param.paramValue, 0);
+    }
+
+    param = ZL_Graph_getLocalIntParam(graph, ZL_ENTROPY_MIN_GAIN_PCT_PID);
+    size_t minGainPct = kDefaultMinGainPct;
+    if (param.paramId != ZL_LP_INVALID_PARAMID) {
+        minGainPct = (size_t)ZL_MIN(ZL_MAX(param.paramValue, 0), 100);
+    }
+
+    return ZL_MAX(minGainBytes, (contentSize / 100) * minGainPct);
+}
+
+static ZL_NodeID huffmanNode(HuffmanMode mode, int formatVersion)
+{
+    if (formatVersion < 27) {
+        // PivCo-Huffman not yet supported
+        mode = HM_huf0;
+    }
+    switch (mode) {
+        // Default to Huf0 for now, this will be swapped in a future diff.
+        case HM_any:
+        case HM_huf0:
+            return (ZL_NodeID){ ZL_PrivateStandardNodeID_huffman_v2 };
+        case HM_pivco:
+            return (ZL_NodeID){ ZL_PrivateStandardNodeID_pivco_huffman };
+        default:
+            ZL_ASSERT(false, "Invalid Huffman mode");
+            return ZL_NODE_ILLEGAL;
+    }
 }
 
 /**
  * Entropy compresses a single chunk by selecting the most efficient backend
  * allowed by the mode.
  */
-static ZL_Report
-entropyCompressChunk(ZL_Graph* gctx, ZL_Edge* chunk, EntropyBackendMode mode)
+static ZL_Report entropyCompressChunk(
+        ZL_Graph* gctx,
+        ZL_Edge* chunk,
+        EntropyBackendMode mode,
+        size_t minGainBytes,
+        HuffmanMode hufMode)
 {
+    ZL_RESULT_DECLARE_SCOPE_REPORT(gctx);
     ZL_Input const* input = ZL_Edge_getData(chunk);
     size_t const nbElts   = ZL_Input_numElts(input);
     size_t const eltWidth = ZL_Input_eltWidth(input);
@@ -616,7 +775,7 @@ entropyCompressChunk(ZL_Graph* gctx, ZL_Edge* chunk, EntropyBackendMode mode)
         ZL_ASSERT_EQ(ZL_Input_type(input), ZL_Type_struct);
         ZL_Histogram* histogram = (ZL_Histogram*)ZL_Graph_getScratchSpace(
                 gctx, sizeof(ZL_Histogram16));
-        ZL_RET_R_IF_NULL(allocation, histogram);
+        ZL_ERR_IF_NULL(histogram, allocation);
         ZL_Histogram_init(histogram, 65535);
         ZL_Histogram_build(histogram, ZL_Input_ptr(input), nbElts, eltWidth);
 
@@ -640,132 +799,165 @@ entropyCompressChunk(ZL_Graph* gctx, ZL_Edge* chunk, EntropyBackendMode mode)
         size_t const nbBits = (size_t)ZL_nextPow2(histogram->maxSymbol + 1);
         size_t const bitpackSize = ((nbElts * nbBits + 7) / 8) + /* header */ 2;
 
-        if (bitpackSize <= huffSize && bitpackSize < storeSize) {
+        if (bitpackSize <= huffSize
+            && bitpackSize + minGainBytes <= storeSize) {
             return runBitpack(chunk);
         }
 
         // Check if we can simply store the data
-        if (entropy > 15 || huffSize >= storeSize) {
+        if (entropy > 15 || huffSize + minGainBytes > storeSize) {
             return ZL_Edge_setDestination(chunk, ZL_GRAPH_STORE);
         }
 
         // Check if we can use tokenization
         if (histogram->cardinality < 256) {
-            ZL_TRY_LET_T(
+            ZL_TRY_LET(
                     ZL_EdgeList,
                     streams,
                     ZL_Edge_runNode(chunk, ZL_NODE_TOKENIZE));
             ZL_ASSERT_EQ(streams.nbEdges, 2);
             // Bitpack the values stream if possible
-            ZL_RET_R_IF_ERR(
+            ZL_ERR_IF_ERR(
                     nbBits < 16 ? runBitpack(streams.edges[0])
                                 : ZL_Edge_setDestination(
                                           streams.edges[0], ZL_GRAPH_STORE));
             // Huffman compress the tokenized stream
-            ZL_RET_R_IF_ERR(
+            ZL_ERR_IF_ERR(
                     ZL_Edge_setDestination(streams.edges[1], ZL_GRAPH_HUFFMAN));
             return ZL_returnSuccess();
         }
 
         // TODO: Allow tokenization
-        ZL_TRY_LET_T(
+        ZL_TRY_LET(
                 ZL_EdgeList,
                 streams,
-                runNode_wHistogram(
+                runNode_withParams(
                         chunk,
                         (ZL_NodeID){
                                 ZL_PrivateStandardNodeID_huffman_struct_v2 },
-                        histogram));
+                        histogram,
+                        NULL));
         ZL_ASSERT_EQ(streams.nbEdges, 2);
-        ZL_RET_R_IF_ERR(ZL_Edge_setDestination(streams.edges[0], ZL_GRAPH_FSE));
-        ZL_RET_R_IF_ERR(
-                ZL_Edge_setDestination(streams.edges[1], ZL_GRAPH_STORE));
+        ZL_ERR_IF_ERR(ZL_Edge_setDestination(streams.edges[0], ZL_GRAPH_FSE));
+        ZL_ERR_IF_ERR(ZL_Edge_setDestination(streams.edges[1], ZL_GRAPH_STORE));
         return ZL_returnSuccess();
     }
 
     DataStatsU8 stats;
     DataStatsU8_init(&stats, ZL_Input_ptr(input), nbElts);
+    ZL_Histogram* const histogram = getHistogram8(gctx, &stats);
+    ZL_ERR_IF_NULL(histogram, allocation);
+
+    if (mode == EBM_huf) {
+        // Short-circuit for uncompressible data (taken from FSE's Huffman)
+        if (histogram->largestCount <= (histogram->total >> 7) + 4) {
+            mode = EBM_store;
+        }
+    }
 
     if (DataStatsU8_getCardinality(&stats) == 1) {
         ZL_ASSERT(ZL_Graph_isConstantSupported(gctx));
         return ZL_Edge_setDestination(chunk, ZL_GRAPH_CONSTANT);
     }
 
-    // TODO: At higher compression levels use a better estimate
-    size_t const entropySize = mode == EBM_huf
-            ? DataStatsU8_estimateHuffmanSizeFast(&stats, /* delta */ false)
-            : (size_t)(DataStatsU8_getEntropy(&stats) * (double)nbElts + 7) / 8;
+    // Build the Huffman table if Huffman is allowed. This allows an accurate
+    // estimate of the Huffman compressed size. If Huffman is chosen the CTable
+    // will be passed down to the Huffman node.
+    HUF_CElt* hufCTable = NULL;
+    if (mode == EBM_huf || mode == EBM_any) {
+        hufCTable = ZL_Graph_getScratchSpace(
+                gctx, HUF_CTABLE_SIZE(histogram->maxSymbol));
+        ZL_ERR_IF_NULL(hufCTable, allocation);
+        ZL_ERR_IF_ERR(buildHufCTable(hufCTable, histogram));
+    }
 
-    size_t const headerSizeEstimate =
-            ZL_MAX(10, DataStatsU8_getCardinality(&stats) / 4);
-
-    size_t const baselineSize =
-            ZL_MIN(entropySize + headerSizeEstimate, nbElts);
+    const size_t entropySize =
+            resolveMode(&stats, histogram, hufCTable, minGainBytes, &mode);
+    ZL_ASSERT_LE(entropySize, nbElts);
 
     size_t const flatpackedSize = DataStatsU8_getFlatpackedSize(&stats);
     size_t const bitpackedSize  = DataStatsU8_getBitpackedSize(&stats);
 
     if (flatpackedSize < bitpackedSize) {
-        if (flatpackedSize < baselineSize) {
+        if (flatpackedSize < entropySize
+            && flatpackedSize + minGainBytes <= nbElts) {
             return ZL_Edge_setDestination(chunk, ZL_GRAPH_FLATPACK);
         }
     } else {
-        if (bitpackedSize < baselineSize) {
+        if (bitpackedSize <= entropySize
+            && bitpackedSize + minGainBytes <= nbElts) {
             return ZL_Edge_setDestination(chunk, ZL_GRAPH_BITPACK);
         }
     }
 
-    if (nbElts <= baselineSize) {
-        return ZL_Edge_setDestination(chunk, ZL_GRAPH_STORE);
-    }
-
-    // Select between FSE & Huffman
-    mode = resolveMode(&stats, mode);
-
-    ZL_Histogram* histogram = getHistogram8(gctx, &stats);
     if (mode == EBM_huf) {
-        ZL_TRY_LET_T(
+        ZL_NodeID node = huffmanNode(
+                hufMode, ZL_Graph_getCParam(gctx, ZL_CParam_formatVersion));
+        ZL_TRY_LET(
                 ZL_EdgeList,
                 streams,
-                runNode_wHistogram(
-                        chunk,
-                        (ZL_NodeID){ ZL_PrivateStandardNodeID_huffman_v2 },
-                        histogram));
+                runNode_withParams(chunk, node, histogram, hufCTable));
         ZL_ASSERT_EQ(streams.nbEdges, 2);
-        ZL_RET_R_IF_ERR(ZL_Edge_setDestination(streams.edges[0], ZL_GRAPH_FSE));
-        ZL_RET_R_IF_ERR(
-                ZL_Edge_setDestination(streams.edges[1], ZL_GRAPH_STORE));
+        // TODO(T267366720): Improve Huffman header encoding.
+        // Bitpack is fast but leaves a lot on the table, however FSE is too
+        // slow on small inputs to be worthwhile.
+        ZL_ERR_IF_ERR(
+                ZL_Edge_setDestination(streams.edges[0], ZL_GRAPH_BITPACK_INT));
+        ZL_ERR_IF_ERR(ZL_Edge_setDestination(streams.edges[1], ZL_GRAPH_STORE));
         return ZL_returnSuccess();
-    } else {
-        ZL_TRY_LET_T(
+    } else if (mode == EBM_fse) {
+        ZL_TRY_LET(
                 ZL_EdgeList,
                 streams,
-                runNode_wHistogram(
+                runNode_withParams(
                         chunk,
                         (ZL_NodeID){ ZL_PrivateStandardNodeID_fse_v2 },
-                        histogram));
+                        histogram,
+                        hufCTable));
         ZL_ASSERT_EQ(streams.nbEdges, 2);
-        ZL_RET_R_IF_ERR(ZL_Edge_setDestination(
+        ZL_ERR_IF_ERR(ZL_Edge_setDestination(
                 streams.edges[0],
                 (ZL_GraphID){ ZL_PrivateStandardGraphID_fse_ncount }));
-        ZL_RET_R_IF_ERR(
-                ZL_Edge_setDestination(streams.edges[1], ZL_GRAPH_STORE));
+        ZL_ERR_IF_ERR(ZL_Edge_setDestination(streams.edges[1], ZL_GRAPH_STORE));
         return ZL_returnSuccess();
+    } else {
+        ZL_ASSERT_EQ(mode, EBM_store);
+        return ZL_Edge_setDestination(chunk, ZL_GRAPH_STORE);
     }
 }
 
-static ZL_Report
-entropyDynamicGraph(ZL_Graph* gctx, ZL_Edge* sctx, EntropyBackendMode mode)
+static ZL_Report entropyDynamicGraph(
+        ZL_Graph* gctx,
+        ZL_Edge* sctx,
+        EntropyBackendMode mode,
+        HuffmanMode hufMode)
 {
-    ZL_TRY_LET_T(ZL_EdgeList, chunks, chunkInputStream(gctx, &sctx));
+    ZL_RESULT_DECLARE_SCOPE_REPORT(gctx);
+
+    const size_t contentSize = ZL_Input_contentSize(ZL_Edge_getData(sctx));
+
+    if (contentSize <= 1) {
+        return ZL_Edge_setDestination(sctx, ZL_GRAPH_STORE);
+    }
+
+    const size_t minGainBytes = getMinGainBytes(gctx, contentSize);
+
+    ZL_TRY_LET(ZL_EdgeList, chunks, chunkInputStream(gctx, &sctx));
     for (size_t i = 0; i < chunks.nbEdges; ++i) {
-        ZL_RET_R_IF_ERR(entropyCompressChunk(gctx, chunks.edges[i], mode));
+        // Scale minGainBytes to divide evenly among the chunks
+        const size_t chunkSize =
+                ZL_Input_contentSize(ZL_Edge_getData(chunks.edges[i]));
+        const size_t scaledMinGainBytes =
+                (minGainBytes * chunkSize) / contentSize;
+        ZL_ERR_IF_ERR(entropyCompressChunk(
+                gctx, chunks.edges[i], mode, scaledMinGainBytes, hufMode));
     }
     return ZL_returnSuccess();
 }
 
 static ZL_Report doEntropyConversion(ZL_Graph* gctx, ZL_Edge** sctx)
 {
+    ZL_RESULT_DECLARE_SCOPE_REPORT(gctx);
     (void)gctx;
 
     ZL_Input const* const input = ZL_Edge_getData(*sctx);
@@ -779,19 +971,18 @@ static ZL_Report doEntropyConversion(ZL_Graph* gctx, ZL_Edge** sctx)
             ZL_NodeID const conversion = type == ZL_Type_numeric
                     ? ZL_NODE_CONVERT_NUM_TO_SERIAL
                     : ZL_NODE_CONVERT_TOKEN_TO_SERIAL;
-            ZL_TRY_LET_T(
-                    ZL_EdgeList, serial, ZL_Edge_runNode(*sctx, conversion));
+            ZL_TRY_LET(ZL_EdgeList, serial, ZL_Edge_runNode(*sctx, conversion));
             *sctx = serial.edges[0];
         }
     } else {
         ZL_ASSERT_GT(eltWidth, 1);
-        ZL_RET_R_IF_NE(node_invalid_input, eltWidth, 2);
+        ZL_ERR_IF_NE(eltWidth, 2, node_invalid_input);
 
         if (type == ZL_Type_numeric) {
             // Accept numeric inputs so we don't get a conversion from
             // numeric -> struct -> serial for eltWidth 1 data. Then convert
             // to struct for eltWidth 2.
-            ZL_TRY_LET_T(
+            ZL_TRY_LET(
                     ZL_EdgeList,
                     structs,
                     ZL_Edge_runNode(*sctx, ZL_NODE_CONVERT_NUM_TO_TOKEN));
@@ -815,11 +1006,12 @@ static ZL_Report doEntropyConversion(ZL_Graph* gctx, ZL_Edge** sctx)
 
 ZL_Report EI_fseDynamicGraph(ZL_Graph* gctx, ZL_Edge* inputs[], size_t nbIns)
 {
-    ZL_RET_R_IF(graph_invalidNumInputs, nbIns != 1);
+    ZL_RESULT_DECLARE_SCOPE_REPORT(gctx);
+    ZL_ERR_IF(nbIns != 1, graph_invalidNumInputs);
     ZL_Edge* input = inputs[0];
-    ZL_RET_R_IF_ERR(doEntropyConversion(gctx, &input));
+    ZL_ERR_IF_ERR(doEntropyConversion(gctx, &input));
     if (ZL_Graph_getCParam(gctx, ZL_CParam_formatVersion) < 15) {
-        ZL_TRY_LET_T(
+        ZL_TRY_LET(
                 ZL_EdgeList,
                 streams,
                 ZL_Edge_runNode(
@@ -829,15 +1021,19 @@ ZL_Report EI_fseDynamicGraph(ZL_Graph* gctx, ZL_Edge* inputs[], size_t nbIns)
         ZL_ASSERT_EQ(streams.nbEdges, 1);
         return ZL_Edge_setDestination(streams.edges[0], ZL_GRAPH_STORE);
     }
-    return entropyDynamicGraph(gctx, input, EBM_fse);
+    return entropyDynamicGraph(gctx, input, EBM_fse, HM_any);
 }
 
-ZL_Report
-EI_huffmanDynamicGraph(ZL_Graph* gctx, ZL_Edge* inputs[], size_t nbIns)
+static ZL_Report EI_huffmanDynamicGraphImpl(
+        ZL_Graph* gctx,
+        ZL_Edge* inputs[],
+        size_t nbIns,
+        HuffmanMode hufMode)
 {
-    ZL_RET_R_IF(graph_invalidNumInputs, nbIns != 1);
+    ZL_RESULT_DECLARE_SCOPE_REPORT(gctx);
+    ZL_ERR_IF(nbIns != 1, graph_invalidNumInputs);
     ZL_Edge* input = inputs[0];
-    ZL_RET_R_IF_ERR(doEntropyConversion(gctx, &input));
+    ZL_ERR_IF_ERR(doEntropyConversion(gctx, &input));
     if (ZL_Graph_getCParam(gctx, ZL_CParam_formatVersion) < 15) {
         ZL_NodeID const node =
                 ZL_Input_type(ZL_Edge_getData(input)) == ZL_Type_serial
@@ -845,26 +1041,68 @@ EI_huffmanDynamicGraph(ZL_Graph* gctx, ZL_Edge* inputs[], size_t nbIns)
                 : (ZL_NodeID){
                       ZL_PrivateStandardNodeID_huffman_fixed_deprecated
                   };
-        ZL_TRY_LET_T(ZL_EdgeList, streams, ZL_Edge_runNode(input, node));
+        ZL_TRY_LET(ZL_EdgeList, streams, ZL_Edge_runNode(input, node));
         ZL_ASSERT_EQ(streams.nbEdges, 1);
         return ZL_Edge_setDestination(streams.edges[0], ZL_GRAPH_STORE);
     }
-    return entropyDynamicGraph(gctx, input, EBM_huf);
+    return entropyDynamicGraph(gctx, input, EBM_huf, hufMode);
+}
+
+ZL_Report
+EI_huffmanDynamicGraph(ZL_Graph* gctx, ZL_Edge* inputs[], size_t nbIns)
+{
+    return EI_huffmanDynamicGraphImpl(gctx, inputs, nbIns, HM_any);
+}
+
+ZL_Report
+EI_huffmanDynamicGraphHuf0(ZL_Graph* gctx, ZL_Edge* inputs[], size_t nbIns)
+{
+    return EI_huffmanDynamicGraphImpl(gctx, inputs, nbIns, HM_huf0);
+}
+
+ZL_Report
+EI_huffmanDynamicGraphPivco(ZL_Graph* gctx, ZL_Edge* inputs[], size_t nbIns)
+{
+    return EI_huffmanDynamicGraphImpl(gctx, inputs, nbIns, HM_pivco);
 }
 
 ZL_Report
 EI_entropyDynamicGraph(ZL_Graph* gctx, ZL_Edge* inputs[], size_t nbIns)
 {
-    ZL_RET_R_IF(graph_invalidNumInputs, nbIns != 1);
+    ZL_RESULT_DECLARE_SCOPE_REPORT(gctx);
+    ZL_ERR_IF(nbIns != 1, graph_invalidNumInputs);
     ZL_Edge* input = inputs[0];
-    ZL_RET_R_IF_ERR(doEntropyConversion(gctx, &input));
+    ZL_ERR_IF_ERR(doEntropyConversion(gctx, &input));
     if (ZL_Graph_getCParam(gctx, ZL_CParam_formatVersion) < 15) {
         ZL_Input const* stream = ZL_Edge_getData(input);
         if (ZL_Input_type(stream) != ZL_Type_serial) {
-            return EI_huffmanDynamicGraph(gctx, inputs, nbIns);
+            return EI_huffmanDynamicGraph(gctx, &input, 1);
         }
         ZL_GraphID const graph = EI_selector_entropy(gctx, input);
         return ZL_Edge_setDestination(input, graph);
     }
-    return entropyDynamicGraph(gctx, input, EBM_any);
+    return entropyDynamicGraph(gctx, input, EBM_any, HM_any);
+}
+
+ZL_Report ZL_Edge_setEntropyDestination(
+        ZL_Edge* edge,
+        ZL_GraphID entropyGraph,
+        int minGainBytes,
+        int minGainPct)
+{
+    ZL_IntParam intParams[2];
+    size_t numIntParams = 0;
+    if (minGainBytes >= 0) {
+        intParams[numIntParams++] =
+                (ZL_IntParam){ ZL_ENTROPY_MIN_GAIN_BYTES_PID, minGainBytes };
+    }
+    if (minGainPct >= 0) {
+        intParams[numIntParams++] =
+                (ZL_IntParam){ ZL_ENTROPY_MIN_GAIN_PCT_PID, minGainPct };
+    }
+    ZL_LocalParams lp = { .intParams = { intParams, numIntParams } };
+    ZL_RuntimeGraphParameters params = {
+        .localParams = &lp,
+    };
+    return ZL_Edge_setParameterizedDestination(&edge, 1, entropyGraph, &params);
 }

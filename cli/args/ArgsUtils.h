@@ -4,6 +4,7 @@
 
 #include <string>
 
+#include "cli/utils/compress_profiles.h"
 #include "openzl/cpp/Compressor.hpp"
 
 namespace openzl {
@@ -18,9 +19,9 @@ void checkOutput(const std::string& path, bool force);
  * created compressor.
  */
 std::unique_ptr<Compressor> createCompressorFromArgs(
-        const std::optional<std::string>& profileName,
-        const std::optional<std::string>& profileArg,
-        const std::optional<std::string>& compressorPath);
+        const ProfileArgs& profileArgs,
+        const std::optional<std::string>& compressorPath,
+        poly::string_view bundleData = "");
 
 } // namespace cli
 } // namespace openzl

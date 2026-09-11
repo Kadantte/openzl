@@ -12,9 +12,9 @@ ZL_Report
 MultiInputGraph_compress(ZL_Graph* gctx, ZL_Edge* inputs[], size_t nbInputs)
 {
     ZL_DLOG(SEQ, "MultiInputGraph_compress: %zu inputs", nbInputs);
-    (void)gctx;
+    ZL_RESULT_DECLARE_SCOPE_REPORT(gctx);
     for (size_t n = 0; n < nbInputs; n++) {
-        ZL_RET_R_IF_ERR(ZL_Edge_setDestination(inputs[n], ZL_GRAPH_COMPRESS1));
+        ZL_ERR_IF_ERR(ZL_Edge_setDestination(inputs[n], ZL_GRAPH_COMPRESS1));
     }
     return ZL_returnSuccess();
 }
@@ -94,15 +94,12 @@ ZL_GraphID SI_selector_compress_numeric(
         const ZL_GraphID* customGraphs,
         size_t nbCustomGraphs)
 {
+    /* Preserve the private numeric-compress graph as a compatibility shim. */
     ZL_ASSERT_EQ(ZL_Input_type(inputStream), ZL_Type_numeric);
     (void)selCtx;
     (void)customGraphs;
     (void)nbCustomGraphs;
-    // There is no generic graph for numeric streams yet.
-    // This will likely evolve in the future.
-    // For the time being, defer to Fixed-size fields,
-    // which will likely employ FieldLZ.
-    return ZL_GRAPH_STRUCT_COMPRESS;
+    return ZL_GRAPH_NUMERIC;
 }
 
 ZL_GraphID SI_selector_compress_string(

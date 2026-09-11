@@ -13,11 +13,17 @@ function(add_zs_test TESTNAME)
 endfunction()
 
 add_subdirectory(datagen)
+add_subdirectory(compat)
 
 file(
     GLOB_RECURSE test_fixtures
     CONFIGURE_DEPENDS
     "${CMAKE_CURRENT_LIST_DIR}/openzl/test_*_fixture.*")
+
+file(
+    GLOB_RECURSE test_registry
+    CONFIGURE_DEPENDS
+    "${CMAKE_CURRENT_LIST_DIR}/registry/*.cpp")
 
 add_library(openzl_test_support
     ${support_sources}
@@ -25,7 +31,10 @@ add_library(openzl_test_support
     ${CMAKE_CURRENT_LIST_DIR}/utils.h
     ${CMAKE_CURRENT_LIST_DIR}/local_params_utils.cpp
     ${CMAKE_CURRENT_LIST_DIR}/local_params_utils.h
+    ${CMAKE_CURRENT_LIST_DIR}/ml_selector_utils.cpp
+    ${CMAKE_CURRENT_LIST_DIR}/ml_selector_utils.h
     ${test_fixtures}
+    ${test_registry}
 )
 target_include_directories(openzl_test_support
     SYSTEM
@@ -52,7 +61,44 @@ file(GLOB_RECURSE test_compress_srcs CONFIGURE_DEPENDS
     "${CMAKE_CURRENT_LIST_DIR}/compress/*.c")
 file(GLOB_RECURSE test_compress_headers CONFIGURE_DEPENDS
     "${CMAKE_CURRENT_LIST_DIR}/compress/*.h")
-add_zs_test(test_compress ${test_compress_srcs} ${test_compress_headers})
+# Exclude sddl2 tests - they have their own build system and test framework (Makefile-based)
+list(FILTER test_compress_srcs EXCLUDE REGEX ".*/compress/graphs/sddl2/.*")
+list(FILTER test_compress_headers EXCLUDE REGEX ".*/compress/graphs/sddl2/.*")
+add_zs_test(
+    test_compress
+    ${test_compress_srcs}
+    ${test_compress_headers}
+    ${CMAKE_CURRENT_LIST_DIR}/zstrong/test_zstrong_fixture.cpp)
+
+include(CheckCXXSourceCompiles)
+check_cxx_source_compiles(
+    "int main(int argc, char**) {
+        unsigned __int128 value = static_cast<unsigned __int128>(1) << 100;
+        return static_cast<int>(value / static_cast<unsigned>(argc));
+    }"
+    OPENZL_TEST_COMPILER_HAS_INT128_DIVISION)
+target_compile_definitions(test_compress PRIVATE
+    OPENZL_TEST_COMPILER_HAS_INT128_DIVISION=$<BOOL:${OPENZL_TEST_COMPILER_HAS_INT128_DIVISION}>)
+# Fallback-only toolchains exercise the portable implementation through
+# test_compress. On native-capable hosts, build a second target that forces the
+# fallback while retaining native 128-bit arithmetic as a reference.
+if (OPENZL_TEST_COMPILER_HAS_INT128_DIVISION)
+    add_executable(test_transformer_wide_arith_fallback
+        ${CMAKE_CURRENT_LIST_DIR}/compress/test_transformer_wide_arith.cpp
+        ${OPENZL_SRC_DIR}/openzl/common/logging.c
+        ${OPENZL_SRC_DIR}/openzl/compress/selectors/transformer/wide_arith.c)
+    target_compile_definitions(test_transformer_wide_arith_fallback
+        PRIVATE
+            OPENZL_TEST_COMPILER_HAS_INT128_DIVISION=1
+            TRS_WIDE_FORCE_FALLBACK=1)
+    target_link_libraries(test_transformer_wide_arith_fallback
+        PRIVATE
+            openzl_deps
+            GTest::gtest_main)
+    apply_openzl_compile_options_to_target(test_transformer_wide_arith_fallback)
+    gtest_discover_tests(test_transformer_wide_arith_fallback
+        TEST_PREFIX "Fallback.")
+endif()
 
 file(GLOB_RECURSE test_decompress_srcs CONFIGURE_DEPENDS
     "${CMAKE_CURRENT_LIST_DIR}/decompress/*.cpp"
@@ -61,11 +107,22 @@ file(GLOB_RECURSE test_decompress_headers CONFIGURE_DEPENDS
     "${CMAKE_CURRENT_LIST_DIR}/decompress/*.h")
 add_zs_test(test_decompress ${test_decompress_srcs} ${test_decompress_headers})
 
+# Collect all integrationtest files except the conditional ones
+file(GLOB_RECURSE integrationtest_srcs CONFIGURE_DEPENDS
+    "${CMAKE_CURRENT_LIST_DIR}/integrationtest/*.cpp")
+
+# Exclude the conditional test files
+list(FILTER integrationtest_srcs EXCLUDE REGEX ".*/CompressIntrospectionTest\\.cpp$")
+list(FILTER integrationtest_srcs EXCLUDE REGEX ".*/NoIntrospectionTest\\.cpp$")
+
+# Add the appropriate conditional file
 if (OPENZL_ALLOW_INTROSPECTION)
     add_zs_test(integrationtest
+                ${integrationtest_srcs}
                 ${CMAKE_CURRENT_LIST_DIR}/integrationtest/CompressIntrospectionTest.cpp)
 else()
     add_zs_test(integrationtest
+                ${integrationtest_srcs}
                 ${CMAKE_CURRENT_LIST_DIR}/integrationtest/NoIntrospectionTest.cpp)
 endif()
 target_link_libraries(integrationtest PRIVATE openzl_cpp)
@@ -91,6 +148,17 @@ add_zs_test(test_codecs ${test_codecs_srcs} ${test_codecs_headers})
 target_link_libraries(test_codecs
     PRIVATE
         sddl_compiler_lib
+        sddl2_compiler_lib
 )
-add_dependencies(test_codecs sddl_compiler_lib)
+add_dependencies(test_codecs sddl_compiler_lib sddl2_compiler_lib)
 
+# Serialization tests (excludes fuzzer files)
+file(GLOB serialization_test_srcs CONFIGURE_DEPENDS
+    "${CMAKE_CURRENT_LIST_DIR}/serialization/*.cpp")
+file(GLOB serialization_test_headers CONFIGURE_DEPENDS
+    "${CMAKE_CURRENT_LIST_DIR}/serialization/*.h")
+list(FILTER serialization_test_srcs EXCLUDE REGEX ".*/fuzz_.*\\.cpp$")
+add_zs_test(test_serialization ${serialization_test_srcs} ${serialization_test_headers})
+
+# NOTE: Fuzzer tests (zstrong/fuzz_*.cpp) are BUCK-only targets using Meta's
+# Lionhead infrastructure and are not included in the CMake build.

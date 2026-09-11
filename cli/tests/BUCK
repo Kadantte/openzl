@@ -3,132 +3,187 @@
 load("@fbcode_macros//build_defs:custom_unittest.bzl", "custom_unittest")
 load("@fbcode_macros//build_defs:python_binary.bzl", "python_binary")
 load("@fbcode_macros//build_defs:python_library.bzl", "python_library")
+load("../../defs.bzl", "zs_cxxbinary", "zs_unittest")
 
 oncall("data_compression")
+
+# @autodeps-skip
+
+zs_unittest(
+    name = "util_test",
+    srcs = ["unittest/UtilTest.cpp"],
+    deps = [
+        "../../cpp:openzl_cpp",
+        "../../tools:logger",
+        "../utils:utils",
+    ],
+)
 
 custom_unittest(
     name = "serial_test",
     command = [
         "$(location :integration_test_bin)",
-        "$(location //data_compression/experimental/zstrong/cli:zli)",
+        "$(location ..:zli)",
         "SerialTest.test_compress_decompress",
     ],
     type = "simple",
     deps = [
+        "..:zli",
         ":integration_test_bin",
-        "//data_compression/experimental/zstrong/cli:zli",
     ],
 )
 
 custom_unittest(
-    name = "csv_train_inline_test",
+    name = "u16_train_inline_test",
     command = [
-        "$(location :integration_test_bin)",
-        "$(location //data_compression/experimental/zstrong/cli:zli)",
-        "CsvTrainInlineTest.test_train_inline",
+        "$(location :train_test_bin)",
+        "$(location ..:zli)",
+        "U16TrainInlineTest.test_train_inline",
     ],
     type = "simple",
     deps = [
-        ":integration_test_bin",
-        "//data_compression/experimental/zstrong/cli:zli",
+        "..:zli",
+        ":train_test_bin",
     ],
 )
 
 custom_unittest(
     name = "ace_train_inline_test",
     command = [
-        "$(location :integration_test_bin)",
-        "$(location //data_compression/experimental/zstrong/cli:zli)",
+        "$(location :train_test_bin)",
+        "$(location ..:zli)",
         "AceTrainInlineTest.test_train_inline",
     ],
     type = "simple",
     deps = [
-        ":integration_test_bin",
-        "//data_compression/experimental/zstrong/cli:zli",
+        "..:zli",
+        ":train_test_bin",
     ],
 )
 
 custom_unittest(
     name = "csv_default_test",
     command = [
-        "$(location :integration_test_bin)",
-        "$(location //data_compression/experimental/zstrong/cli:zli)",
+        "$(location :formats_test_bin)",
+        "$(location ..:zli)",
         "CsvTest.test_train_compress_decompress",
     ],
     type = "simple",
     deps = [
-        ":integration_test_bin",
-        "//data_compression/experimental/zstrong/cli:zli",
+        "..:zli",
+        ":formats_test_bin",
     ],
 )
 
 custom_unittest(
     name = "csv_greedy_test",
     command = [
-        "$(location :integration_test_bin)",
-        "$(location //data_compression/experimental/zstrong/cli:zli)",
+        "$(location :formats_test_bin)",
+        "$(location ..:zli)",
         "CsvGreedyTest.test_train_compress_decompress",
     ],
     type = "simple",
     deps = [
-        ":integration_test_bin",
-        "//data_compression/experimental/zstrong/cli:zli",
+        "..:zli",
+        ":formats_test_bin",
     ],
 )
 
 custom_unittest(
     name = "csv_full_split_test",
     command = [
-        "$(location :integration_test_bin)",
-        "$(location //data_compression/experimental/zstrong/cli:zli)",
+        "$(location :formats_test_bin)",
+        "$(location ..:zli)",
         "CsvFullSplitTest.test_train_compress_decompress",
     ],
     type = "simple",
     deps = [
-        ":integration_test_bin",
-        "//data_compression/experimental/zstrong/cli:zli",
+        "..:zli",
+        ":formats_test_bin",
     ],
 )
 
 custom_unittest(
     name = "csv_bottom_up_test",
     command = [
-        "$(location :integration_test_bin)",
-        "$(location //data_compression/experimental/zstrong/cli:zli)",
+        "$(location :formats_test_bin)",
+        "$(location ..:zli)",
         "CsvBottomUpTest.test_train_compress_decompress",
     ],
     type = "simple",
     deps = [
-        ":integration_test_bin",
-        "//data_compression/experimental/zstrong/cli:zli",
+        "..:zli",
+        ":formats_test_bin",
+    ],
+)
+
+custom_unittest(
+    name = "csv_chunked_test",
+    command = [
+        "$(location :formats_test_bin)",
+        "$(location ..:zli)",
+        "CsvChunkedTest.test_train_compress_decompress",
+    ],
+    type = "simple",
+    deps = [
+        "..:zli",
+        ":formats_test_bin",
+    ],
+)
+
+custom_unittest(
+    name = "sddl2_chunked_train_test",
+    command = [
+        "$(location :train_test_bin)",
+        "$(location ..:zli)",
+        "Sddl2ChunkedTrainTest.test_train_compress_decompress",
+    ],
+    type = "simple",
+    deps = [
+        "..:zli",
+        ":train_test_bin",
+    ],
+)
+
+custom_unittest(
+    name = "parquet_chunked_test",
+    command = [
+        "$(location :formats_test_bin)",
+        "$(location ..:zli)",
+        "ParquetChunkedTest.test_chunk_size_affects_output",
+    ],
+    type = "simple",
+    deps = [
+        "..:zli",
+        ":formats_test_bin",
     ],
 )
 
 custom_unittest(
     name = "parquet_test",
     command = [
-        "$(location :integration_test_bin)",
-        "$(location //data_compression/experimental/zstrong/cli:zli)",
+        "$(location :formats_test_bin)",
+        "$(location ..:zli)",
         "ParquetTest.test_train_compress_decompress",
     ],
     type = "simple",
     deps = [
-        ":integration_test_bin",
-        "//data_compression/experimental/zstrong/cli:zli",
+        "..:zli",
+        ":formats_test_bin",
     ],
 )
 
 custom_unittest(
     name = "csv_alternative_separator_test",
     command = [
-        "$(location :integration_test_bin)",
-        "$(location //data_compression/experimental/zstrong/cli:zli)",
+        "$(location :formats_test_bin)",
+        "$(location ..:zli)",
         "CsvAlternativeSeparatorTest.test_compress_decompress",
     ],
     type = "simple",
     deps = [
-        ":integration_test_bin",
-        "//data_compression/experimental/zstrong/cli:zli",
+        "..:zli",
+        ":formats_test_bin",
     ],
 )
 
@@ -136,13 +191,181 @@ custom_unittest(
     name = "benchmark_csv_compression_test",
     command = [
         "$(location :integration_test_bin)",
-        "$(location //data_compression/experimental/zstrong/cli:zli)",
+        "$(location ..:zli)",
         "BenchmarkCsvCompressionTest.test_benchmark",
     ],
     type = "simple",
     deps = [
+        "..:zli",
         ":integration_test_bin",
-        "//data_compression/experimental/zstrong/cli:zli",
+    ],
+)
+
+custom_unittest(
+    name = "numeric_segmentation_roundtrip_test",
+    command = [
+        "$(location :integration_test_bin)",
+        "$(location ..:zli)",
+        "NumericSegmentationTest.test_numeric_profiles_roundtrip",
+    ],
+    type = "simple",
+    deps = [
+        "..:zli",
+        ":integration_test_bin",
+    ],
+)
+
+custom_unittest(
+    name = "numeric_segmentation_level_7_test",
+    command = [
+        "$(location :integration_test_bin)",
+        "$(location ..:zli)",
+        "NumericSegmentationTest.test_numeric_profiles_compress_at_level_7",
+    ],
+    type = "simple",
+    deps = [
+        "..:zli",
+        ":integration_test_bin",
+    ],
+)
+
+custom_unittest(
+    name = "numeric_segmentation_endianness_test",
+    command = [
+        "$(location :integration_test_bin)",
+        "$(location ..:zli)",
+        "NumericSegmentationTest.test_equivalent_endianness_has_matching_compressed_size",
+    ],
+    type = "simple",
+    deps = [
+        "..:zli",
+        ":integration_test_bin",
+    ],
+)
+
+custom_unittest(
+    name = "numeric_segmentation_chunk_size_test",
+    command = [
+        "$(location :integration_test_bin)",
+        "$(location ..:zli)",
+        "NumericSegmentationTest.test_numeric_profiles_with_chunk_size",
+    ],
+    type = "simple",
+    deps = [
+        "..:zli",
+        ":integration_test_bin",
+    ],
+)
+
+custom_unittest(
+    name = "compression_level_test",
+    command = [
+        "$(location :integration_test_bin)",
+        "$(location ..:zli)",
+        "CompressionLevelTest.test_compression_level",
+    ],
+    type = "simple",
+    deps = [
+        "..:zli",
+        ":integration_test_bin",
+    ],
+)
+
+custom_unittest(
+    name = "sao_compression_level_test",
+    command = [
+        "$(location :integration_test_bin)",
+        "$(location ..:zli)",
+        "CompressionLevelTest.test_sao_compression_level",
+    ],
+    type = "simple",
+    deps = [
+        "..:zli",
+        ":integration_test_bin",
+    ],
+)
+
+custom_unittest(
+    name = "serial_segmentation_default_test",
+    command = [
+        "$(location :integration_test_bin)",
+        "$(location ..:zli)",
+        "SerialSegmentationTest.test_serial_default_chunk_size",
+    ],
+    type = "simple",
+    deps = [
+        "..:zli",
+        ":integration_test_bin",
+    ],
+)
+
+custom_unittest(
+    name = "serial_segmentation_chunk_size_test",
+    command = [
+        "$(location :integration_test_bin)",
+        "$(location ..:zli)",
+        "SerialSegmentationTest.test_serial_with_chunk_size",
+    ],
+    type = "simple",
+    deps = [
+        "..:zli",
+        ":integration_test_bin",
+    ],
+)
+
+custom_unittest(
+    name = "strict_mode_permissive_test",
+    command = [
+        "$(location :integration_test_bin)",
+        "$(location ..:zli)",
+        "StrictModeTest.test_permissive_mode_succeeds",
+    ],
+    type = "simple",
+    deps = [
+        "..:zli",
+        ":integration_test_bin",
+    ],
+)
+
+custom_unittest(
+    name = "strict_mode_fails_test",
+    command = [
+        "$(location :integration_test_bin)",
+        "$(location ..:zli)",
+        "StrictModeTest.test_strict_mode_fails",
+    ],
+    type = "simple",
+    deps = [
+        "..:zli",
+        ":integration_test_bin",
+    ],
+)
+
+custom_unittest(
+    name = "u8_test",
+    command = [
+        "$(location :integration_test_bin)",
+        "$(location ..:zli)",
+        "U8Test.test_compress_decompress",
+    ],
+    type = "simple",
+    deps = [
+        "..:zli",
+        ":integration_test_bin",
+    ],
+)
+
+custom_unittest(
+    name = "u8_train_test",
+    command = [
+        "$(location :train_test_bin)",
+        "$(location ..:zli)",
+        "U8TrainTest.test_train_compress_decompress",
+    ],
+    type = "simple",
+    deps = [
+        "..:zli",
+        ":train_test_bin",
     ],
 )
 
@@ -150,12 +373,40 @@ custom_unittest(
     name = "all_integration_tests",
     command = [
         "$(location :integration_test_bin)",
-        "$(location //data_compression/experimental/zstrong/cli:zli)",
+        "$(location ..:zli)",
     ],
     type = "simple",
     deps = [
+        "..:zli",
         ":integration_test_bin",
-        "//data_compression/experimental/zstrong/cli:zli",
+    ],
+)
+
+custom_unittest(
+    name = "chunk_size_binary_suffix_test",
+    command = [
+        "$(location :integration_test_bin)",
+        "$(location ..:zli)",
+        "ChunkSizeBinarySuffixTest.test_compress_decompress",
+    ],
+    type = "simple",
+    deps = [
+        "..:zli",
+        ":integration_test_bin",
+    ],
+)
+
+custom_unittest(
+    name = "invalid_chunk_size_test",
+    command = [
+        "$(location :integration_test_bin)",
+        "$(location ..:zli)",
+        "InvalidChunkSizeTest.test_invalid_suffix_rejected",
+    ],
+    type = "simple",
+    deps = [
+        "..:zli",
+        ":integration_test_bin",
     ],
 )
 
@@ -167,6 +418,31 @@ python_binary(
     deps = [
         ":abstract_compression_test",
         ":command_utils",
+        ":file_utils",
+    ],
+)
+
+python_binary(
+    name = "formats_test_bin",
+    srcs = ["cli_formats_tests.py"],
+    base_module = "",
+    main_function = "cli_formats_tests.main",
+    deps = [
+        ":abstract_compression_test",
+        ":command_utils",
+        ":file_utils",
+    ],
+)
+
+python_binary(
+    name = "train_test_bin",
+    srcs = ["cli_train_tests.py"],
+    base_module = "",
+    main_function = "cli_train_tests.main",
+    deps = [
+        ":abstract_compression_test",
+        ":command_utils",
+        ":file_utils",
     ],
 )
 
@@ -178,6 +454,7 @@ python_library(
     deps = [
         ":command_utils",
         ":file_utils",
+        "//openzl:openzl_py",
     ],
 )
 
@@ -186,7 +463,7 @@ python_library(
     srcs = ["command_utils.py"],
     base_module = "",
     resources = {
-        "//data_compression/experimental/zstrong/cli:zli": "bin/zli",
+        "..:zli": "bin/zli",
     },
     typing = True,
     deps = [],
@@ -196,8 +473,131 @@ python_library(
     name = "file_utils",
     srcs = ["file_utils.py"],
     base_module = "",
-    resources = glob(["sample_files/**/*"]),
+    resources = glob(["sample_files/**/*"]) + glob(["profile_files/**/*"]),
     typing = True,
+    deps = [],
+)
+
+custom_unittest(
+    name = "trace_test",
+    command = [
+        "$(location :integration_test_bin)",
+        "$(location ..:zli)",
+        "TraceTest.test_compress_decompress_with_trace",
+    ],
+    type = "simple",
     deps = [
+        "..:zli",
+        ":integration_test_bin",
+    ],
+)
+
+custom_unittest(
+    name = "ml_selector_test",
+    command = [
+        "$(location :train_test_bin)",
+        "$(location ..:zli)",
+        "MLSelectorTest.test_train_compress_decompress",
+    ],
+    type = "simple",
+    deps = [
+        "..:zli",
+        ":train_test_bin",
+    ],
+)
+
+custom_unittest(
+    name = "ml_dynamic_successor_test",
+    command = [
+        "$(location :train_test_bin)",
+        "$(location ..:zli)",
+        "MLDynamicSuccessorTest.test_dynamic_ml_successors",
+    ],
+    type = "simple",
+    deps = [
+        "..:zli",
+        ":train_test_bin",
+    ],
+)
+
+custom_unittest(
+    name = "ml_dynamic_successor_compression_ratio_test",
+    command = [
+        "$(location :train_test_bin)",
+        "$(location ..:zli)",
+        "MLDynamicSuccessorTest.test_compression_ratios",
+    ],
+    type = "simple",
+    deps = [
+        "..:zli",
+        ":train_test_bin",
+    ],
+)
+
+custom_unittest(
+    name = "sddl2_test",
+    command = [
+        "$(location :train_test_bin)",
+        "$(location ..:zli)",
+        "SDDL2TrainTest.test_train_compress_decompress",
+    ],
+    type = "simple",
+    deps = [
+        "..:zli",
+        ":train_test_bin",
+    ],
+)
+
+custom_unittest(
+    name = "csv_save_ace_state_test",
+    command = [
+        "$(location :formats_test_bin)",
+        "$(location ..:zli)",
+        "CsvSaveAceStateTest.test_train_compress_decompress",
+    ],
+    type = "simple",
+    deps = [
+        "..:zli",
+        ":formats_test_bin",
+    ],
+)
+
+custom_unittest(
+    name = "zstd_dict_training_test",
+    command = [
+        "$(location :integration_test_bin)",
+        "$(location ..:zli)",
+        "ZstdDictTrainingTest.test_train_compress_decompress",
+    ],
+    type = "simple",
+    deps = [
+        "..:zli",
+        ":integration_test_bin",
+    ],
+)
+
+custom_unittest(
+    name = "zstd_dict_train_inline_test",
+    command = [
+        "$(location :train_test_bin)",
+        "$(location ..:zli)",
+        "MLDynamicSuccessorTest.test_train_inline_preserves_input_bundle",
+        "$(location :make_trainable_dict_compressor)",
+    ],
+    type = "simple",
+    deps = [
+        "..:zli",
+        ":make_trainable_dict_compressor",
+        ":train_test_bin",
+    ],
+)
+
+zs_cxxbinary(
+    name = "make_trainable_dict_compressor",
+    srcs = ["make_trainable_dict_compressor.cpp"],
+    deps = [
+        "../..:zstronglib",
+        "../../cpp:openzl_cpp",
+        "../../custom_parsers:custom_parsers",
     ],
 )

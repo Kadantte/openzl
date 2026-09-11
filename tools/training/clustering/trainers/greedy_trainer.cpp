@@ -3,6 +3,8 @@
 #include "tools/training/clustering/trainers/greedy_trainer.h"
 
 #include <algorithm>
+#include <chrono>
+
 #include "tools/logger/Logger.h"
 
 #include "tools/training/clustering/clustering_config_builder.h"
@@ -67,14 +69,14 @@ ClusteringConfigBuilder GreedyTrainer::getTrainedClusteringConfig(
             // Solo splits
             std::vector<ClusteringConfigBuilder> candidates;
             auto soloSplitCandidate = bestConfig.buildConfigClusterSoloSplit(
-                    metadata, cUtils, column.tag);
+                    metadata, cUtils, column);
             // Add candidate to list of the candidates of the iteration
             candidates.emplace_back(soloSplitCandidate);
             // Pair splits
             for (auto similarTag : similarColumns_[column]) {
                 auto pairSplitCandidate =
                         bestConfig.buildConfigClusterPairSplit(
-                                metadata, cUtils, column.tag, similarTag.tag);
+                                metadata, cUtils, column, similarTag);
                 // Add candidate to list of the candidates of the iteration
                 candidates.emplace_back(pairSplitCandidate);
             }
@@ -238,7 +240,7 @@ void GreedyTrainer::initSimilarInputs(
                         / (marginalCosts_[column1] + marginalCosts_[column2]);
                 return std::make_pair(contextualSimilarity, column2);
             };
-            futures.emplace_back(threadPool_->run(task));
+            futures.emplace_back(threadPool_.run(task));
         }
         similarityScoreColumns.reserve(futures.size());
         for (auto& future : futures) {

@@ -1,12 +1,10 @@
 # Copyright (c) Meta Platforms, Inc. and affiliates.
 
-# pyre-strict
 
 from typing import List, Tuple
 from unittest import TestCase
 
 import numpy as np
-
 from openzl import ext
 
 

@@ -4,7 +4,7 @@
 #include "custom_transforms/thrift/tests/util.h"     // @manual
 #include "custom_transforms/thrift/thrift_parsers.h" // @manual
 
-#include "security/lionhead/utils/lib_ftest/enable_sfdp_thrift.h"
+#include "security/lionhead/utils/lib_ftest/enable_sfdp_thrift.h" // IWYU pragma: keep
 
 // Must be included after enable_sfdp_thrift.h
 
@@ -16,8 +16,11 @@ using apache::thrift::BinarySerializer;
 using apache::thrift::CompactSerializer;
 using namespace ::testing;
 
-namespace zstrong::thrift::tests {
-using namespace ::zstrong::tests;
+namespace openzl::thrift::tests {
+
+using namespace zstrong::thrift;
+namespace cpp2 = zstrong::thrift::tests::cpp2;
+using namespace ::openzl::tests;
 namespace lionhead = ::facebook::security::lionhead;
 
 namespace {
@@ -117,17 +120,15 @@ std::pair<int, int> genFormatVersions(
             lionhead::fdp::Coin(0.9).gen(
                     "should_format_versions_be_compatible", f)
             || mode == GenFormatVersionsMode::kForceCompatible;
-    int const encoderFormatVersion = helper(
-            ::zstrong::thrift::kMinFormatVersionEncode, ZL_MAX_FORMAT_VERSION);
+    int const encoderFormatVersion =
+            helper(kMinFormatVersionEncode, ZL_MAX_FORMAT_VERSION);
     if (useCompatibleVersions) {
         int const configFormatVersion =
-                helper(::zstrong::thrift::kMinFormatVersionEncode,
-                       encoderFormatVersion);
+                helper(kMinFormatVersionEncode, encoderFormatVersion);
         return { configFormatVersion, encoderFormatVersion };
     } else {
         int const configFormatVersion =
-                helper(::zstrong::thrift::kMinFormatVersionEncode,
-                       ZL_MAX_FORMAT_VERSION);
+                helper(kMinFormatVersionEncode, ZL_MAX_FORMAT_VERSION);
         return { configFormatVersion, encoderFormatVersion };
     }
 }
@@ -268,4 +269,4 @@ FUZZ_F(ProbSelectorTest, FuzzRoundTrip)
             convertedInput);
 }
 
-} // namespace zstrong::thrift::tests
+} // namespace openzl::thrift::tests

@@ -1,6 +1,5 @@
 # Copyright (c) Meta Platforms, Inc. and affiliates.
 
-# pyre-unsafe
 
 import datetime
 import json
@@ -170,7 +169,7 @@ class ZstrongGoogleBenchmarkResults:
         df[base_dimensions()].fillna("N/A")
         for m in base_metrics():
             if m not in df:
-                df[m] = np.NaN
+                df[m] = np.nan
         df = df[base_dimensions() + base_metrics()].copy()
         return cls(df)
 
@@ -198,7 +197,7 @@ class ZstrongGoogleBenchmarkResults:
                 f"Scuba table {table}/{subset} has duplciated columns, see https://www.internalfb.com/intern/qa/4589/how-to-solve-scuba-warning-duplicate-backend-colum"
             )
         for metric in base_metrics():
-            query_results[metric] = query_results[metric].replace("null", np.NaN)
+            query_results[metric] = query_results[metric].replace("null", np.nan)
             query_results[metric] = query_results[metric].astype(float)
         if len(query_results) == 0:
             raise RuntimeError("Couldn't find results in scuba")
@@ -228,6 +227,7 @@ class ZstrongGoogleBenchmarkResults:
         return cls.from_scuba("zstrong_benchmarks", "raw", filters={"run_id": run_id})
 
     def to_markdown(self) -> str:
+        # pyrefly: ignore [missing-attribute]
         md = self.results.to_markdown(showindex=False).replace("|:--", "|---")
         if md is None:
             raise RuntimeError("Unable to create markdown, tabulate might be missing")
@@ -265,9 +265,9 @@ class ZstrongGoogleBenchmarkResults:
         for metric, desc in key_metrics().items():
             log.debug(f"Processing metric {metric} {desc}")
             if metric not in self.results:
-                self.results[metric] = np.NaN
+                self.results[metric] = np.nan
                 continue
-            self.results[metric].fillna(np.NaN)
+            self.results[metric].fillna(np.nan)
 
             def top_values(arr, n):
                 if desc.deterministic or n == 0:
@@ -325,16 +325,18 @@ class ZstrongGoogleBenchmarkResults:
             metric_columns.append(f"{metric}_diff")
 
             def calc_p_value(type="two-sided", shift=0):
-                col_name = f"{metric}_p_value_{type.replace('-','_')}"
+                col_name = f"{metric}_p_value_{type.replace('-', '_')}"
                 joint[col_name] = joint[[f"{metric}_arr_1", f"{metric}_arr_2"]].apply(
-                    lambda x: st.ttest_ind(
-                        x[0] * (1 + shift),
-                        x[1],
-                        trim=0.1,
-                        equal_var=False,
-                        alternative=type,
-                        random_state=1337,
-                    ).pvalue,
+                    lambda x: (
+                        st.ttest_ind(
+                            x[0] * (1 + shift),
+                            x[1],
+                            trim=0.1,
+                            equal_var=False,
+                            alternative=type,
+                            random_state=1337,
+                        ).pvalue
+                    ),
                     axis=1,
                 )
                 metric_columns.append(col_name)
@@ -436,7 +438,7 @@ class ZstrongGoogleBenchmarkRunner:
             args = [
                 "--benchmark_format=json",
                 # "--benchmark_enable_random_interleaving=true",
-                f"--benchmark_repetitions={min(self.MAX_REPS_PER_EXECUTION, self.repetitions-rep)}",
+                f"--benchmark_repetitions={min(self.MAX_REPS_PER_EXECUTION, self.repetitions - rep)}",
             ]
             if self.min_time:
                 args.append(f"--benchmark_min_time={self.min_time}")
@@ -460,5 +462,7 @@ class ZstrongGoogleBenchmarkRunner:
                 result = result.append(curr_result)
             else:
                 result = curr_result
+        # pyrefly: ignore [missing-attribute]
         result.set_timestamp()
+        # pyrefly: ignore [bad-return]
         return result

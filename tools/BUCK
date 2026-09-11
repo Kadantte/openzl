@@ -1,9 +1,26 @@
 # Copyright (c) Meta Platforms, Inc. and affiliates.
 
 load("@fbcode_macros//build_defs:cpp_library.bzl", "cpp_library")
-load("//data_compression/experimental/zstrong:defs.bzl", "zs_cxxbinary", "zs_cxxlibrary", "zs_library", "zs_unittest")
+load("@fbcode_macros//build_defs:native_rules.bzl", "buck_filegroup")
+load("../defs.bzl", "relative_headers", "zs_cxxbinary", "zs_cxxlibrary", "zs_library", "zs_unittest")
 
 oncall("data_compression")
+
+# Yarn workspace root files shared by every web tool. package.json, yarn.lock and
+# tsconfig.base.json are genuine build inputs (see WebToolConfig.source_dependencies_relative);
+# the lint/format configs are listed too so that dependents get rescheduled on any
+# workspace-root change, which is cheaper than missing one.
+buck_filegroup(
+    name = "web_workspace_srcs",
+    srcs = [
+        ".prettierignore",
+        ".prettierrc",
+        "eslint.config.js",
+        "package.json",
+        "tsconfig.base.json",
+        "yarn.lock",
+    ],
+)
 
 zs_cxxlibrary(
     name = "arg",
@@ -20,7 +37,7 @@ zs_library(
         "fileio/fileio.h",
     ],
     exported_deps = [
-        "//data_compression/experimental/zstrong:common",
+        "..:common",
     ],
 )
 
@@ -29,11 +46,11 @@ zs_cxxlibrary(
     srcs = ["zstrong_cpp.cpp"],
     headers = ["zstrong_cpp.h"],
     exported_deps = [
-        "//data_compression/experimental/zstrong:zstronglib",
-        "//data_compression/experimental/zstrong/cpp:openzl_cpp",
-        "//data_compression/experimental/zstrong/custom_transforms/json_extract:json_extract",
-        "//data_compression/experimental/zstrong/custom_transforms/parse:parse",
-        "//data_compression/experimental/zstrong/custom_transforms/thrift:thrift_lib",
+        "..:zstronglib",
+        "../cpp:openzl_cpp",
+        "../custom_transforms/json_extract:json_extract",
+        "../custom_transforms/parse:parse",
+        "../custom_transforms/thrift:thrift_lib",
     ],
 )
 
@@ -43,9 +60,10 @@ zs_cxxlibrary(
     headers = ["zstrong_ml.h"],
     compiler_flags = ["-Wno-float-equal"],
     strict_conversions = False,
+    deps = [],
     exported_deps = [
+        "gbt_predictor:zstrong_gbt_predictor",
         ":zstrong_cpp",
-        "//data_compression/experimental/zstrong/tools/gbt_predictor:zstrong_gbt_predictor",
         "//folly:base64",
         "//folly:dynamic",
         "//folly:synchronized",
@@ -58,9 +76,10 @@ zs_cxxlibrary(
     headers = ["zstrong_json.h"],
     compiler_flags = ["-Wno-float-equal"],
     strict_conversions = False,
+    deps = [],
     exported_deps = [
+        "..:zstronglib",
         ":zstrong_cpp",
-        "//data_compression/experimental/zstrong:zstronglib",
         "//folly:base64",
         "//folly:dynamic",
         "//folly:file_util",
@@ -70,11 +89,10 @@ zs_cxxlibrary(
 )
 
 cpp_library(
+    # @autodeps-skip
     name = "json",
-    headers = ["json.hpp"],
-    exported_deps = [
-        "fbsource//third-party/libgcc:stdc++fs",
-    ],
+    headers = relative_headers(["json.hpp"]),
+    header_namespace = "",
 )
 
 zs_cxxbinary(
@@ -87,7 +105,7 @@ zs_cxxbinary(
     deps = [
         "fbsource//third-party/apache-arrow:arrow",
         ":arg",
-        "//data_compression/experimental/zstrong/tools:io",
+        ":io",
     ],
 )
 
@@ -100,7 +118,7 @@ zs_library(
         "time/timefn.h",
     ],
     exported_deps = [
-        "//data_compression/experimental/zstrong:common",
+        "..:common",
     ],
 )
 
@@ -130,7 +148,7 @@ zs_cxxlibrary(
     srcs = glob(["io/**/*.cpp"]),
     headers = glob(["io/**/*.h"]),
     exported_deps = [
+        "../cpp:openzl_cpp",
         ":logger",
-        "//data_compression/experimental/zstrong/cpp:openzl_cpp",
     ],
 )

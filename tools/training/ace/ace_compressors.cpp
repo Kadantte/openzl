@@ -6,6 +6,8 @@
 #include "openzl/zl_reflection.h"
 #include "tools/training/ace/ace_sampling.h"
 
+#include "openzl/cpp/codecs/Bitsplit.hpp"
+
 namespace openzl {
 namespace training {
 namespace {
@@ -43,11 +45,15 @@ ACENode buildNode(const NodeT& node)
     for (const auto& meta : NodeT::metadata.variableOutputs) {
         outputTypes.push_back(meta.type);
     }
+    Compressor compressor;
+    const unsigned minFormatVersion =
+            ZL_Compressor_Node_getMinVersion(compressor.get(), NodeT::node);
     return ACENode{
-        .name        = getName(NodeT::node),
-        .params      = node.parameters(),
-        .inputType   = NodeT::metadata.inputs[0].type,
-        .outputTypes = std::move(outputTypes),
+        .name             = getName(NodeT::node),
+        .params           = node.parameters(),
+        .inputType        = NodeT::metadata.inputs[0].type,
+        .outputTypes      = std::move(outputTypes),
+        .minFormatVersion = minFormatVersion,
     };
 }
 
@@ -88,6 +94,9 @@ std::vector<ACENode> makeAllNodes()
     n.push_back(buildNode(nodes::QuantizeOffsets{}));
     n.push_back(buildNode(nodes::QuantizeLengths{}));
     n.push_back(buildNode(nodes::TransposeSplit{}));
+    n.push_back(buildNode(nodes::BitsplitFP{}));
+    n.push_back(buildNode(nodes::BitsplitBF16{}));
+    n.push_back(buildNode(nodes::BitsplitTop8{}));
     n.push_back(buildNode(nodes::Zigzag{}));
     n.push_back(buildNode(nodes::ConvertSerialToNum8{}));
     n.push_back(buildNode(nodes::ConvertSerialToNumLE16{}));
@@ -109,6 +118,7 @@ std::vector<ACEGraph> makeAllGraphs()
 {
     std::vector<ACEGraph> g;
     g.push_back(buildGraph(graphs::Compress{}));
+    g.push_back(buildGraph(graphs::TransformerNumeric{}));
     g.push_back(buildGraph(graphs::Entropy{}));
     g.push_back(buildGraph(graphs::Bitpack{}));
     g.push_back(buildGraph(graphs::Constant{}));
@@ -132,6 +142,7 @@ std::vector<ACECompressor> makePrebuiltNumericCompressors()
         compressors.emplace_back(graph);
     }
 
+    ACECompressor transformer(buildGraph(graphs::TransformerNumeric{}));
     ACECompressor fieldLz(buildGraph(graphs::FieldLz{}));
     ACECompressor zstd(buildGraph(graphs::Zstd{}));
     ACECompressor transpose(buildNode(nodes::TransposeSplit{}), { zstd });
@@ -149,13 +160,26 @@ std::vector<ACECompressor> makePrebuiltNumericCompressors()
     ACECompressor rangePackFieldLz(buildNode(nodes::RangePack{}), { fieldLz });
     ACECompressor rangePackDeltaFieldLz(
             buildNode(nodes::RangePack{}), { deltaFieldLz });
+    ACECompressor entropy(buildGraph(graphs::Entropy{}));
+    ACECompressor top8bitsEntropy(
+            buildNode(nodes::BitsplitTop8{}), { entropy });
+    ACECompressor fpBitsEntropy(buildNode(nodes::BitsplitFP{}), { entropy });
+    ACECompressor bf16BitsEntropy(
+            buildNode(nodes::BitsplitBF16{}), { entropy });
     ACECompressor fse(buildGraph(graphs::Fse{}));
     ACECompressor store(buildGraph(graphs::Store{}));
+    ACECompressor f32Decon(
+            buildNode(nodes::Float32Deconstruct{}), { store, entropy });
+    ACECompressor f16Decon(
+            buildNode(nodes::Float16Deconstruct{}), { store, entropy });
+    ACECompressor bf16Decon(
+            buildNode(nodes::BFloat16Deconstruct{}), { store, entropy });
     ACECompressor quantizeOffsets(
             buildNode(nodes::QuantizeOffsets{}), { fse, store });
     ACECompressor quantizeLengths(
             buildNode(nodes::QuantizeOffsets{}), { fse, store });
     std::vector<ACECompressor> prebuilt = {
+        transformer,
         fieldLz,
         zstd,
         transpose,
@@ -167,6 +191,12 @@ std::vector<ACECompressor> makePrebuiltNumericCompressors()
         deltaZigzagFieldLz,
         rangePackFieldLz,
         rangePackDeltaFieldLz,
+        top8bitsEntropy,
+        fpBitsEntropy,
+        bf16BitsEntropy,
+        f32Decon,
+        f16Decon,
+        bf16Decon,
         quantizeOffsets,
         quantizeLengths,
     };
@@ -285,7 +315,12 @@ poly::span<const ACEGraph> getAllGraphs()
     return *graphs;
 }
 
-poly::span<const ACENode> getNodesComptabileWith(Type inputType)
+// Returns the type-compatible nodes further restricted to those usable at
+// @p formatVersion (nodes with minFormatVersion 0 are treated as
+// unconstrained).
+std::vector<ACENode> getNodesComptabileWith(
+        Type inputType,
+        uint32_t formatVersion)
 {
     static auto nodes = new std::unordered_map<Type, std::vector<ACENode>>([] {
         std::unordered_map<Type, std::vector<ACENode>> m;
@@ -299,7 +334,13 @@ poly::span<const ACENode> getNodesComptabileWith(Type inputType)
         }
         return m;
     }());
-    return nodes->at(inputType);
+    std::vector<ACENode> compatible;
+    for (const auto& n : nodes->at(inputType)) {
+        if (n.minFormatVersion == 0 || n.minFormatVersion <= formatVersion) {
+            compatible.push_back(n);
+        }
+    }
+    return compatible;
 }
 
 poly::span<const ACEGraph> getGraphsComptabileWith(Type inputType)
@@ -344,25 +385,43 @@ ACECompressor buildRandomGraphCompressor(std::mt19937_64& rng, Type inputType)
             randomChoice(rng, getGraphsComptabileWith(inputType)));
 }
 
-ACECompressor
-buildRandomNodeCompressor(std::mt19937_64& rng, Type inputType, size_t maxDepth)
+ACECompressor buildRandomNodeCompressor(
+        std::mt19937_64& rng,
+        Type inputType,
+        uint32_t formatVersion,
+        size_t maxDepth)
 {
     if (maxDepth == 0) {
         return buildRandomGraphCompressor(rng, inputType);
     }
-    auto node = randomChoice(rng, getNodesComptabileWith(inputType));
+    const auto compatible = getNodesComptabileWith(inputType, formatVersion);
+    if (compatible.empty()) {
+        // No node is available at the target format version; fall back to a
+        // single graph.
+        return buildRandomGraphCompressor(rng, inputType);
+    }
+    auto node = randomChoice(
+            rng,
+            poly::span<const ACENode>(compatible.data(), compatible.size()));
     assert(isCompatible(node.inputType, inputType));
     std::vector<std::unique_ptr<ACECompressor>> successors;
     successors.reserve(node.outputTypes.size());
     for (size_t i = 0; i < node.outputTypes.size(); ++i) {
-        successors.push_back(std::make_unique<ACECompressor>(
-                buildRandomCompressor(rng, node.outputTypes[i], maxDepth - 1)));
+        successors.push_back(
+                std::make_unique<ACECompressor>(buildRandomCompressor(
+                        rng,
+                        node.outputTypes[i],
+                        formatVersion,
+                        maxDepth - 1)));
     }
     return ACENodeCompressor(std::move(node), std::move(successors));
 }
 
-ACECompressor
-buildRandomCompressor(std::mt19937_64& rng, Type inputType, size_t maxDepth)
+ACECompressor buildRandomCompressor(
+        std::mt19937_64& rng,
+        Type inputType,
+        uint32_t formatVersion,
+        size_t maxDepth)
 {
     std::bernoulli_distribution dist(0.5);
     if (dist(rng)) {
@@ -370,8 +429,8 @@ buildRandomCompressor(std::mt19937_64& rng, Type inputType, size_t maxDepth)
         assert(compressor.acceptsInputType(inputType));
         return compressor;
     } else {
-        auto compressor =
-                buildRandomNodeCompressor(rng, inputType, maxDepth - 1);
+        auto compressor = buildRandomNodeCompressor(
+                rng, inputType, formatVersion, maxDepth - 1);
         assert(compressor.acceptsInputType(inputType));
         return compressor;
     }

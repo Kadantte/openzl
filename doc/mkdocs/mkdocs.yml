@@ -32,6 +32,32 @@ nav:
     - CLI: getting-started/cli.md
     - Advanced Build Settings: getting-started/advanced-build.md
     - Core Library Limitations: getting-started/library-limitations.md
+  - SDDL:
+      - Overview: sddl/index.md
+      - SDDL2 Announcement: sddl/sddl2-announcement.md
+      - Current Language:
+        - Getting Started: sddl/getting-started.md
+        - Core Concepts: sddl/core-concepts.md
+        - Conditional Fields: sddl/conditional-fields.md
+        - Validation: sddl/validation.md
+        - Instant-Parse: sddl/instant-parse.md
+        - Examples: sddl/examples.md
+        - Quick Reference: sddl/reference.md
+      - North Star (v0.6):
+        - Overview: sddl/north-star/index.md
+        - Introduction & Motivation: sddl/north-star/introduction.md
+        - Getting Started: sddl/north-star/getting-started.md
+        - Core Concepts: sddl/north-star/core-concepts.md
+        - Understanding Instant-Parse: sddl/north-star/instant-parse.md
+        - Arrays and Collections: sddl/north-star/arrays-collections.md
+        - Advanced Layout Control: sddl/north-star/alignment-padding.md
+        - Conditional & Variant Data: sddl/north-star/conditional-variant.md
+        - Variables and Expressions: sddl/north-star/variables-expressions.md
+        - Real-World Formats: sddl/north-star/real-formats.md
+        - Best Practices: sddl/north-star/best-practices.md
+        - Quick Reference: sddl/north-star/reference.md
+        - SDDL for LLMs: sddl/north-star/sddl-for-llm.md
+      - Legacy (SDDL1): sddl/legacy/index.md
   - API Reference:
     - C:
       - Compressor: api/c/compressor.md
@@ -47,6 +73,7 @@ nav:
         - Entropy: api/c/codecs/entropy.md
         - Interleave: api/c/codecs/interleave.md
         - Parse Int: api/c/codecs/parse-int.md
+        - Split By Range: api/c/codecs/split-byrange.md
       - Data: api/c/data.md
       - Graphs:
         - Simple Data Description Language: api/c/graphs/sddl.md
@@ -96,7 +123,13 @@ nav:
       - Version: api/py/version.md
     - Names: api/names.md
   - Tools:
+    - Overview: tools/index.md
     - Trace Visualizer: tools/trace
+  - Blog:
+    - blog/index.md
+
+not_in_nav: |
+  demo.md
 
 theme:
   name: material
@@ -140,6 +173,7 @@ theme:
 
 markdown_extensions:
   - admonition
+  - attr_list
   - pymdownx.details
   - tables
   - md_in_html
@@ -163,6 +197,10 @@ plugins:
       build_directory: ./build-openzl
   - search
   - autorefs
+  - blog:
+      authors: true
+      post_url_date_format: yyyy-MM-dd
+      post_url_format: "{date}-{slug}"
   - mkdocstrings:
       default_handler: zstd
       handlers:

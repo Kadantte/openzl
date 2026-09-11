@@ -8,9 +8,9 @@
 
 namespace openzl {
 namespace {
-std::string format(
+std::string formatMsg(
         std::string_view msg,
-        const poly::optional<ZL_ErrorCode>& code,
+        const poly::optional<ZL_Error>& error,
         poly::string_view errorContext,
         const poly::source_location& location)
 {
@@ -21,11 +21,11 @@ std::string format(
         out += msg;
         out += '\n';
     }
-    if (code.has_value()) {
+    if (error.has_value()) {
         out += "OpenZL error code: ";
-        out += std::to_string(code.value());
+        out += std::to_string(ZL_E_code(error.value()));
         out += "\nOpenZL error string: ";
-        out += ZL_ErrorCode_toString(code.value());
+        out += ZL_ErrorCode_toString(ZL_E_code(error.value()));
         out += "\n";
     }
     if (!errorContext.empty()) {
@@ -60,12 +60,12 @@ Exception::Exception(poly::string_view msg, poly::source_location location)
 
 Exception::Exception(
         poly::string_view msg,
-        poly::optional<ZL_ErrorCode> code,
+        poly::optional<ZL_Error> error,
         poly::string_view errorContext,
         poly::source_location location)
-        : std::runtime_error(format(msg, code, errorContext, location)),
+        : std::runtime_error(formatMsg(msg, error, errorContext, location)),
           msg_(msg),
-          code_(std::move(code)),
+          error_(std::move(error)),
           errorContext_(errorContext),
           location_(std::move(location))
 {
@@ -134,14 +134,21 @@ ExceptionBuilder&& ExceptionBuilder::addErrorContext<ZL_CompressorDeserializer>(
     }
 }
 
+template <>
+ExceptionBuilder&& ExceptionBuilder::addErrorContext<ZL_Graph>(
+        ZL_Graph const* const ctx) && noexcept
+{
+    if (ctx != nullptr && error_.has_value()) {
+        return std::move(*this).withErrorContext(
+                ZL_Graph_getErrorContextString_fromError(ctx, error_.value()));
+    } else {
+        return std::move(*this);
+    }
+}
+
 Exception ExceptionBuilder::build() && noexcept
 {
-    poly::optional<ZL_ErrorCode> code;
-    if (error_.has_value()) {
-        // TODO: when ZL_E_code() is public, use that.
-        code.emplace(ZL_RES_code(ZL_RESULT_WRAP_ERROR(size_t, error_.value())));
-    }
-    return Exception(msg_, code, errorContext_, std::move(location_));
+    return Exception(msg_, error_, errorContext_, std::move(location_));
 }
 
 ZL_Error_Array get_warnings(const ZL_CCtx* const& cctx)

@@ -8,9 +8,9 @@
 
 #include "openzl/zl_common_types.h" // ZL_OpaquePtr
 #include "openzl/zl_compress.h"     // ZL_CParam
-#include "openzl/zl_graph_api.h"    // ZL_RuntimeGraphParameters
 #include "openzl/zl_localParams.h"  // ZL_LocalParams
-#include "openzl/zl_opaque_types.h" // ZL_GraphID
+#include "openzl/zl_materializer.h" // ZL_MaterializerDesc
+#include "openzl/zl_opaque_types.h" // ZL_GraphID, ZL_RuntimeGraphParameters, ZL_Segmenter
 
 #if defined(__cplusplus)
 extern "C" {
@@ -66,7 +66,16 @@ extern "C" {
  * whatever data is left from Input.
  */
 
-typedef struct ZL_Segmenter_s ZL_Segmenter;
+/**
+ * Shared default target chunk size for segmenters that chunk large inputs into
+ * independently compressed pieces.
+ *
+ * This is a policy default, not a lower bound. Individual segmenters may
+ * expose their own local override parameters or choose a different default when
+ * there is a format-specific reason to do so.
+ */
+#define ZL_DEFAULT_SEGMENTER_CHUNK_BYTE_SIZE (16 << 20)
+
 typedef ZL_Report (*ZL_SegmenterFn)(ZL_Segmenter* sctx);
 
 typedef struct {
@@ -88,6 +97,21 @@ typedef struct {
      * registration fails, and it lives for the lifetime of the compressor.
      */
     ZL_OpaquePtr opaque;
+    /**
+     * Optional materializer for compression-only materialized parameters
+     * (MParams). If materializeFn is non-null, it will be called during
+     * compressor deserialization to create the materialized object from
+     * the serialized MParam blob. Unlike dicts, MParams are NOT required
+     * at decompression time.
+     */
+    ZL_MaterializerDesc mparamMat;
+    /**
+     * Optional MParam associated with this segmenter. The provided content
+     * blob will be materialized as dictated by @p mparamMat . OpenZL will not
+     * take ownership of the content provided. The caller is free to free the
+     * buffer anytime after registering the segmenter.
+     */
+    ZL_MParam mparam;
 } ZL_SegmenterDesc;
 
 /**
@@ -141,6 +165,14 @@ const void* ZL_Segmenter_getOpaquePtr(const ZL_Segmenter* segCtx);
 int ZL_Segmenter_getCParam(const ZL_Segmenter* segCtx, ZL_CParam gparam);
 
 /**
+ * @brief Retrieves all local params for the segmenter.
+ *
+ * A convenience function equivalent to calling ZL_Segmenter_getLocalIntParam()
+ * and ZL_Segmenter_getLocalRefParam() on each int and ref param.
+ */
+const ZL_LocalParams* ZL_Segmenter_getLocalParams(const ZL_Segmenter* segCtx);
+
+/**
  * @brief Retrieve a local integer parameter value.
  *
  * Accesses local integer parameters that were provided during segmenter
@@ -169,6 +201,13 @@ ZL_IntParam ZL_Segmenter_getLocalIntParam(
 ZL_RefParam ZL_Segmenter_getLocalRefParam(
         const ZL_Segmenter* segCtx,
         int refParamId);
+
+/**
+ * @returns The materialized MParam object associated with this segmenter, if
+ * there is one. Otherwise NULL. MParams are compression-only resources
+ * that are not required at decompression time.
+ */
+const void* ZL_Segmenter_getMParam(const ZL_Segmenter* segCtx);
 
 /**
  * @brief Retrieve the list of custom successor graphs available to this

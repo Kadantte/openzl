@@ -3,7 +3,6 @@
 #ifndef ZSTRONG_DECOMPRESS_DCTX2_H
 #define ZSTRONG_DECOMPRESS_DCTX2_H
 
-#include "openzl/common/wire_format.h"            // PublicTransformInfo
 #include "openzl/decompress/decode_frameheader.h" // DFH_Struct
 #include "openzl/shared/portability.h"
 #include "openzl/zl_data.h"         // ZL_Type
@@ -57,6 +56,15 @@ ZL_Data* DCTX_newStreamFromStreamRef(
 size_t ZL_DCtx_getNumStreams(const ZL_DCtx* dctx);
 
 const ZL_Data* ZL_DCtx_getConstStream(const ZL_DCtx* dctx, ZL_IDType streamID);
+
+/**
+ * @returns The decoder node that produces @p streamID, or ZL_PRODUCER_STORE
+ * when the stream is stored in the frame.
+ * @pre @p streamID is less than ZL_DCtx_getNumStreams(@p dctx).
+ */
+ZL_IDType DCTX_getStreamProducerNodeIdx(
+        const ZL_DCtx* dctx,
+        ZL_IDType streamID);
 
 /**
  * @pre Can only be called during an active decompression,
@@ -124,6 +132,88 @@ size_t DCTX_streamMemory(ZL_DCtx const* dctx);
 ZL_Report DCtx_setAppliedParameters(ZL_DCtx* dctx);
 
 int DCtx_getAppliedGParam(const ZL_DCtx* dctx, ZL_DParam gdparam);
+
+/// Sentinel value indicating a stream is stored in the frame rather than
+/// produced by a decoder node.
+#define ZL_PRODUCER_STORE ((ZL_IDType)(-1))
+
+typedef struct ZL_AppendToOutputOptimization_s ZL_AppendToOutputOptimization;
+
+typedef struct ZL_DecoderFusionDesc_s ZL_DecoderFusionDesc;
+
+/// Metadata about a single data stream in the decompression context.
+typedef struct ZL_DCtx_DataInfo {
+    ZL_Data* data;
+    ZL_AppendToOutputOptimization* appendOpt;
+    /// The index of the node that produced this stream or
+    /// ZL_PRODUCER_STORE if stored in the frame.
+    ZL_IDType producerNodeIdx;
+} ZL_DCtx_DataInfo;
+
+/**
+ * Run the decoder for a single node.
+ *
+ * @param nodeInfo The node to run.
+ * @param withinFusedDecoder If true, this function is being called from within
+ * a currently executing decoder fusion via ZL_DecoderFusion_runCodec(), so do
+ * not search for decoder fusions as the caller is explicitly asking for the
+ * codec to be executed.
+ */
+ZL_Report DCTX_runDecoder(
+        ZL_DCtx* dctx,
+        const DFH_NodeInfo* nodeInfo,
+        bool withinFusedDecoder);
+
+/// Register a decoder fusion with the decompression context.
+/// @see ZL_DecoderFusionState_registerFusion()
+ZL_Report DCTX_registerDecoderFusion(
+        ZL_DCtx* dctx,
+        const ZL_DecoderFusionDesc* fusion);
+
+/// Remove all registered decoder fusions from the decompression context.
+/// @see ZL_DecoderFusionState_clearFusions()
+void DCTX_clearDecoderFusions(ZL_DCtx* dctx);
+
+/**
+ * Initializes a newly created decompression context from frame metadata.
+ * The context owns an independent copy of @p frameInfo.
+ */
+ZL_Report DCTX_initFromFrameInfo(ZL_DCtx* dctx, const ZL_FrameInfo* frameInfo);
+
+typedef struct {
+    size_t chunkHeaderSize;
+    size_t chunkSize;
+} DCTX_FrameChunkInfo;
+ZL_RESULT_DECLARE_TYPE(DCTX_FrameChunkInfo);
+
+/**
+ * Prepares one chunk without running its decoders.
+ *
+ * @p dctx must first be initialized.
+ * @returns The prepared chunk metadata, or an error.
+ */
+ZL_RESULT_OF(DCTX_FrameChunkInfo)
+DCTX_prepareFrameChunk(
+        ZL_DCtx* dctx,
+        const void* framePtr,
+        size_t frameSize,
+        size_t chunkOffset);
+
+/**
+ * Prepares one chunk from a separately readable formal chunk header.
+ *
+ * Stream references are bound against @p chunkRef, whose contents are not
+ * accessed. Payload and checksum validation are left to the caller.
+ * @p dctx must first be initialized.
+ * @returns Success, or an errors if the stream layout exceeds @p chunkSize
+ * or an error from decoding the header.
+ */
+ZL_Report DCTX_prepareFrameChunkFromHeader(
+        ZL_DCtx* dctx,
+        const void* chunkHeader,
+        size_t chunkHeaderSize,
+        const void* chunkRef,
+        size_t chunkSize);
 
 ZL_END_C_DECLS
 

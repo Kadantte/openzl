@@ -19,6 +19,9 @@ extern "C" {
 // and erroneous manipulation of values.
 
 typedef unsigned int ZL_IDType;
+typedef struct {
+    unsigned char bytes[32];
+} ZL_UniqueID;
 
 // opaque => never use definition !!!
 typedef struct {
@@ -33,6 +36,35 @@ typedef struct {
     ZL_IDType gid;
 } ZL_GraphID;
 
+typedef struct {
+    ZL_UniqueID id;
+} ZL_DictID;
+
+typedef struct {
+    ZL_UniqueID id;
+} ZL_MParamID;
+
+typedef struct {
+    ZL_UniqueID id;
+} ZL_BundleID;
+
+// Helper macros for creating IDs in a C++ compatible way
+#if defined(__cplusplus)
+// C++ compatible versions using constructor syntax
+#    define ZL_MAKE_NODE_ID(id) (ZL_NodeID{ (id) })
+#    define ZL_MAKE_GRAPH_ID(id) (ZL_GraphID{ (id) })
+#    define ZL_DICT_ID_NULL (ZL_DictID{})
+#    define ZL_BUNDLE_ID_NULL (ZL_BundleID{})
+#    define ZL_MPARAM_ID_NULL (ZL_MParamID{})
+#else
+// C99 compound literals
+#    define ZL_MAKE_NODE_ID(id) ((ZL_NodeID){ .nid = (id) })
+#    define ZL_MAKE_GRAPH_ID(id) ((ZL_GraphID){ .gid = (id) })
+#    define ZL_DICT_ID_NULL ((ZL_DictID){ .id = { { 0 } } })
+#    define ZL_BUNDLE_ID_NULL ((ZL_BundleID){ .id = { { 0 } } })
+#    define ZL_MPARAM_ID_NULL ((ZL_MParamID){ .id = { { 0 } } })
+#endif
+
 // Incomplete types
 typedef struct Stream_s Stream;
 typedef Stream ZL_Data;
@@ -40,6 +72,7 @@ typedef struct ZL_Input_s ZL_Input;
 typedef struct ZL_Output_s ZL_Output;
 typedef ZL_Input ZL_TypedRef;
 typedef struct ZL_Compressor_s ZL_Compressor;
+typedef struct ZL_Materializer_s ZL_Materializer;
 typedef struct ZL_CompressorSerializer_s ZL_CompressorSerializer;
 typedef struct ZL_CompressorDeserializer_s ZL_CompressorDeserializer;
 typedef struct ZL_CCtx_s ZL_CCtx;
@@ -49,6 +82,10 @@ typedef struct ZL_Decoder_s ZL_Decoder;
 typedef struct ZL_Selector_s ZL_Selector;
 typedef struct ZL_Graph_s ZL_Graph;
 typedef struct ZL_Edge_s ZL_Edge;
+typedef struct ZL_GraphParameters_s ZL_RuntimeGraphParameters;
+typedef struct ZL_Segmenter_s ZL_Segmenter;
+typedef struct ZL_DictLoader_s ZL_DictLoader;
+typedef struct ZL_FatBundleDictLoader_s ZL_FatBundleDictLoader;
 
 // Generic List construction macro (C99)
 #define ZL_LIST_SIZE(_type, ...) \

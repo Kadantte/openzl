@@ -10,6 +10,7 @@
 #include "openzl/cpp/CCtx.hpp"
 #include "openzl/cpp/DCtx.hpp"
 #include "openzl/cpp/Exception.hpp"
+#include "openzl/cpp/FatBundleDictLoader.hpp"
 #include "openzl/zl_compress.h"
 
 #include "cli/utils/util.h"
@@ -22,7 +23,6 @@ using namespace openzl::tools::logger;
 
 namespace {
 constexpr size_t BYTES_TO_MB = 1000 * 1000;
-constexpr size_t BYTES_TO_GB = BYTES_TO_MB * 1000;
 
 /// Updates the printed line of benchmarks based on the new parameters provided.
 /// @return The BenchmarkResult structure containing ratio and speeds
@@ -99,9 +99,17 @@ BenchmarkResult runCompressionBenchmarks(const BenchmarkArgs& args)
     const auto iters = args.numIters;
 
     // create compressor, context, and decompression context
-    auto cctx =
-            createCompressionContext(*args.compressor, args.level, args.strict);
+    auto cctx = createCompressionContext(
+            *args.compressor(), args.level, args.strict);
+    std::optional<FatBundleDictLoader> fatBundleLoader;
     DCtx dctx;
+
+    // Load dict bundle into DCtx if available
+    if (!args.dictBundleData.empty()) {
+        fatBundleLoader.emplace();
+        fatBundleLoader->loadFatBundle(args.dictBundleData);
+        dctx.refDictLoader(*fatBundleLoader);
+    }
 
     // if output is not specified, don't write csv-formatted summary statistics
     tools::io::OutputNull devnull{};
@@ -123,11 +131,6 @@ BenchmarkResult runCompressionBenchmarks(const BenchmarkArgs& args)
         size_t uncompressed_size = 0;
         for (const auto& input : *inputs) {
             uncompressed_size += input.contentSize();
-        }
-        // TODO: Size limitations should be a library feature
-        if (uncompressed_size > BYTES_TO_GB / 2) {
-            throw std::runtime_error(
-                    "Chunking support is required for compressing inputs larger than 500 MB. ");
         }
         // get the compressed size
         const auto compressed = cctx.compress(inputVec);

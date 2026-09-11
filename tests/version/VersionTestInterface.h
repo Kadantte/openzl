@@ -8,7 +8,7 @@
 #include <memory>
 #include <vector>
 
-namespace zstrong {
+namespace openzl {
 enum class UseCustomData : bool { Enable = true, Disable = false };
 
 struct CustomData {
@@ -158,14 +158,8 @@ class VersionTestInterface {
     unsigned minFormatVersion() const;
     unsigned maxFormatVersion() const;
 
-    std::vector<Node> const& nodes() const
-    {
-        return nodes_;
-    }
-    std::vector<Graph> const& graphs() const
-    {
-        return graphs_;
-    }
+    std::vector<Node> const& nodes();
+    std::vector<Graph> const& graphs();
 
     /// @returns custom data for the given node, if any exists
     const std::vector<CustomData>& customData(NodeID node);
@@ -263,10 +257,12 @@ class VersionTestInterface {
     };
     std::unique_ptr<void, DlcloseDeleter> handle_;
     VTable vtable_;
+    bool nodesInitialized_{ false };
+    bool graphsInitialized_{ false };
     std::vector<Node> nodes_;
     std::vector<Graph> graphs_;
     std::map<NodeID, std::vector<CustomData>> nodeCustomDataCache_;
     std::map<GraphID, std::vector<CustomData>> graphCustomDataCache_;
 };
 
-} // namespace zstrong
+} // namespace openzl

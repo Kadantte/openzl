@@ -25,6 +25,7 @@ const GCParams GCParams_default = {
     // so we don't need to manage the case of `ZL_TernaryParam_auto`.
     .compressedChecksum = ZL_TernaryParam_enable,
     .contentChecksum    = ZL_TernaryParam_enable,
+    .storeOnExpansion   = ZL_TernaryParam_enable,
     .minStreamSize      = ZL_MINSTREAMSIZE_DEFAULT,
 };
 
@@ -53,13 +54,32 @@ const GCParamToName GCParams_kAllParams[] = {
     { ZL_CParam_compressedChecksum,
       { (const char*[]){ "compressedChecksum" }, 1 } },
     { ZL_CParam_contentChecksum, { (const char*[]){ "contentChecksum" }, 1 } },
+    { ZL_CParam_storeOnExpansion,
+      { (const char*[]){ "storeOnExpansion" }, 1 } },
     { ZL_CParam_minStreamSize, { (const char*[]){ "minStreamSize" }, 1 } }
 };
+
+static ZL_Report setTernaryParam(ZL_TernaryParam* param, int value)
+{
+    ZL_RESULT_DECLARE_SCOPE_REPORT(NULL);
+    switch (value) {
+        case ZL_TernaryParam_enable:
+        case ZL_TernaryParam_disable:
+        case ZL_TernaryParam_auto:
+            *param = (ZL_TernaryParam)value;
+            return ZL_returnSuccess();
+        default:
+            ZL_ERR(compressionParameter_invalid,
+                   "Ternary param value invalid: %d",
+                   value);
+    }
+}
 
 ZL_Report
 GCParams_setParameter(GCParams* gcparams, ZL_CParam paramId, int value)
 {
     ZL_ASSERT_NN(gcparams);
+    ZL_RESULT_DECLARE_SCOPE_REPORT(NULL);
     switch (paramId) {
         case ZL_CParam_stickyParameters:
             gcparams->stickyParameters = (value != 0); // 0 or 1
@@ -73,16 +93,18 @@ GCParams_setParameter(GCParams* gcparams, ZL_CParam paramId, int value)
             gcparams->decompressionLevel = value;
             break;
         case ZL_CParam_permissiveCompression:
-            // TODO (@Cyan): provide bounds
-            gcparams->permissiveCompression = (ZL_TernaryParam)value;
+            ZL_ERR_IF_ERR(
+                    setTernaryParam(&gcparams->permissiveCompression, value));
             break;
         case ZL_CParam_compressedChecksum:
-            // TODO (@Cyan): provide bounds
-            gcparams->compressedChecksum = (ZL_TernaryParam)value;
+            ZL_ERR_IF_ERR(
+                    setTernaryParam(&gcparams->compressedChecksum, value));
             break;
         case ZL_CParam_contentChecksum:
-            // TODO (@Cyan): provide bounds
-            gcparams->contentChecksum = (ZL_TernaryParam)value;
+            ZL_ERR_IF_ERR(setTernaryParam(&gcparams->contentChecksum, value));
+            break;
+        case ZL_CParam_storeOnExpansion:
+            ZL_ERR_IF_ERR(setTernaryParam(&gcparams->storeOnExpansion, value));
             break;
         case ZL_CParam_minStreamSize:
             // TODO (@Cyan): provide bounds
@@ -90,11 +112,11 @@ GCParams_setParameter(GCParams* gcparams, ZL_CParam paramId, int value)
             break;
         case ZL_CParam_formatVersion:
             if (!(value == 0 || ZL_isFormatVersionSupported((uint32_t)value)))
-                ZL_RET_R_ERR(formatVersion_unsupported);
+                ZL_ERR(formatVersion_unsupported);
             gcparams->formatVersion = (uint32_t)value;
             break;
         default:
-            ZL_RET_R_ERR(compressionParameter_invalid);
+            ZL_ERR(compressionParameter_invalid);
     }
     return ZL_returnSuccess();
 }
@@ -134,17 +156,19 @@ void GCParams_applyDefaults(GCParams* dst, const GCParams* defaults)
     SET_DEFAULT(dst, defaults, formatVersion);
     SET_DEFAULT(dst, defaults, compressedChecksum);
     SET_DEFAULT(dst, defaults, contentChecksum);
+    SET_DEFAULT(dst, defaults, storeOnExpansion);
     SET_DEFAULT(dst, defaults, minStreamSize);
 }
 #undef SET_DEFAULT
 
 ZL_Report GCParams_finalize(GCParams* gcparams)
 {
+    ZL_RESULT_DECLARE_SCOPE_REPORT(NULL);
     uint32_t const formatVersion =
             (uint32_t)GCParams_getParameter(gcparams, ZL_CParam_formatVersion);
 
     // Check if the format version is unset
-    ZL_RET_R_IF_EQ(formatVersion_notSet, formatVersion, 0);
+    ZL_ERR_IF_EQ(formatVersion, 0, formatVersion_notSet);
 
     // Turn off checksums for format versions that don't support them.
     if (formatVersion <= 3) {
@@ -180,6 +204,8 @@ int GCParams_getParameter(const GCParams* gcparams, ZL_CParam paramId)
             return (int)gcparams->compressedChecksum;
         case ZL_CParam_contentChecksum:
             return (int)gcparams->contentChecksum;
+        case ZL_CParam_storeOnExpansion:
+            return (int)gcparams->storeOnExpansion;
         case ZL_CParam_minStreamSize:
             return (int)gcparams->minStreamSize;
         default:
@@ -193,11 +219,12 @@ ZL_Report GCParams_forEachParam(
         void* opaque)
 {
     ZL_ASSERT_NN(gcparams);
+    ZL_RESULT_DECLARE_SCOPE_REPORT(NULL);
     for (size_t i = 0; i < ZL_ARRAY_SIZE(GCParams_kAllParams); ++i) {
         const ZL_CParam param = GCParams_kAllParams[i].param;
         const int value       = GCParams_getParameter(gcparams, param);
         if (value != 0) {
-            ZL_RET_R_IF_ERR(callback(opaque, param, value));
+            ZL_ERR_IF_ERR(callback(opaque, param, value));
         }
     }
     return ZL_returnSuccess();
@@ -231,6 +258,7 @@ void GCParams_copy(GCParams* dst, const GCParams* src)
 
 ZL_Report GCParams_strToParam(const char* param)
 {
+    ZL_RESULT_DECLARE_SCOPE_REPORT(NULL);
     const size_t len = strlen(param);
     for (size_t i = 0; i < ZL_ARRAY_SIZE(GCParams_kAllParams); ++i) {
         for (size_t n = 0; n < GCParams_kAllParams[i].names.nbNames; ++n) {
@@ -240,10 +268,7 @@ ZL_Report GCParams_strToParam(const char* param)
             }
         }
     }
-    ZL_RET_R_ERR(
-            compressionParameter_invalid,
-            "Parameter string invalid: %s",
-            param);
+    ZL_ERR(compressionParameter_invalid, "Parameter string invalid: %s", param);
 }
 
 const char* GCParams_paramToStr(ZL_CParam param)

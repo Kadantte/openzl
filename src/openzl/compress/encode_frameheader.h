@@ -6,6 +6,7 @@
 #include "openzl/common/wire_format.h" // ZL_FrameHeaderInfo
 #include "openzl/shared/portability.h"
 #include "openzl/zl_buffer.h" // ZL_RBuffer
+#include "openzl/zl_common_types.h"
 #include "openzl/zl_data.h"   // ZL_Type
 #include "openzl/zl_errors.h" // ZL_Report
 
@@ -29,6 +30,9 @@ typedef struct {
     const ZL_FrameProperties* fprop;
     const InputDesc* inputDescs; /**< Array of input stream's properties */
     size_t numInputs;
+    ZL_Comment comment;
+    const ZL_BundleID* bundleID; /**< vZL_MATERIALIZED_DICT_VERSION_MIN+:
+                                    dict bundle ID, or NULL */
 } EFH_FrameInfo;
 
 /**
@@ -63,6 +67,7 @@ typedef struct {
     const size_t* trHSizes;   /**< Array of transform header sizes (bytes) */
     const size_t* nbVOs;      /**< Array of output counts per transform */
     const size_t* nbTrInputs; /**< Array of input counts per transform */
+    const uint32_t* dictIdxs; /**< Array of dict bundle offsets per transform */
     const uint32_t*
             distances;  /**< Array of dependency distances between transforms */
     size_t nbDistances; /**< Number of dependency distance entries */

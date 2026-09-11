@@ -22,7 +22,7 @@ namespace visualizer {
 
 class CompressionTraceHooks; // forward declaration
 
-}; // namespace visualizer
+} // namespace visualizer
 
 class CCtx {
    public:
@@ -96,11 +96,18 @@ class CCtx {
             GraphID graph,
             const poly::optional<GraphParameters>& params = poly::nullopt);
 
-    void writeTraces(bool enabled);
+    void writeTraces(bool enabled, bool streamPreview = true);
 
+    /**
+     * @returns a pair of the latest trace, and a map from internal stream IDs
+     * to a pair of the raw stream buffer, and a buffer to the string lengths of
+     * the corresponding stream if it is a string stream, otherwise "".
+     */
     std::pair<
             poly::string_view,
-            std::map<size_t, std::pair<poly::string_view, poly::string_view>>>
+            std::map<
+                    std::string,
+                    std::pair<poly::string_view, poly::string_view>>>
     getLatestTrace();
 
    protected:

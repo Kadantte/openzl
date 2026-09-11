@@ -11,6 +11,7 @@
 #include "openzl/compress/gcparams.h"       // GCParams
 #include "openzl/shared/portability.h"
 #include "openzl/zl_compressor.h" // ZL_Compressor
+#include "openzl/zl_dict.h"       // ZL_Dict
 #include "openzl/zl_graph_api.h"  // ZL_FunctionGraphDesc
 #include "openzl/zl_opaque_types.h"
 #include "openzl/zl_segmenter.h"
@@ -44,6 +45,10 @@ const ZL_SegmenterDesc* CGRAPH_getSegmenterDesc(
         const ZL_Compressor* compressor,
         ZL_GraphID graphid);
 
+const void* CGRAPH_getGraphMParamObj(
+        const ZL_Compressor* compressor,
+        ZL_GraphID graphid);
+
 const void* CGRAPH_graphPrivateParam(
         const ZL_Compressor* cgraph,
         ZL_GraphID graphid);
@@ -73,6 +78,89 @@ ZL_NodeID CGraph_registerStandardMITransform(
         const ZL_MIEncoderDesc* mitd,
         unsigned minFormatVersion,
         unsigned maxFormatVersion);
+
+/* =====   Dict accessors   ===== */
+
+/**
+ * @returns the materialized dictionary object at position @p dictOffset
+ * within the compressor's loaded bundle, or NULL if no bundle is loaded.
+ * @pre dictOffset < bundle->numDicts
+ */
+const void* CGRAPH_getDictObj(const ZL_Compressor* cgraph, size_t dictOffset);
+
+/* =====   Dict index resolution   ===== */
+
+/**
+ * For each CNode that declares a dictID, resolve its positional index within
+ * the compressor's loaded bundle and write it into CNode.maybeDictIndex.
+ * CNodes without a dictID keep maybeDictIndex == ZL_DICT_INDEX_NONE.
+ * @returns success, or an error if a required dict is missing from the bundle.
+ */
+ZL_Report CGraph_resolveDictIndices(ZL_Compressor* cgraph);
+
+/* =====   Private actions on Compressor   ===== */
+
+/**
+ * Warning: This is part of experimental API for compressor mutation.
+ *
+ * Requires that:
+ * @p graph is a parameterized graph registered in @p compressor
+ *
+ * Replaces the parameters of @p graph with @p gp.
+ * @note: This function does not validate there are no dependency cycles within
+ * the compressor.
+ */
+ZL_Report ZL_Compressor_overrideGraphParams(
+        ZL_Compressor* compressor,
+        ZL_GraphID graph,
+        const ZL_GraphParameters* gp);
+
+/**
+ * Warning: This is part of experimental API for compressor mutation.
+ *
+ * Requires that:
+ * @p graph is a parameterized graph registered in @p compressor
+ * @p newBaseGraph is a static graph registered in @p compressor
+ * @p newBaseGraph is not a parameterization of @p graph
+ *
+ * Replaces the base graph of the parameterized graph @p graph with @p
+ * newBaseGraph and clears the custom nodes, custom graphs, and local params.
+ *
+ * @warning All parameterizations are cleared because they applied to the old
+ * base graph and do not apply to @p newBaseGraph.
+ *
+ * @returns success, or an error if the requirements are not met.
+ */
+ZL_Report ZL_Compressor_overrideBaseGraph(
+        ZL_Compressor* compressor,
+        ZL_GraphID graph,
+        ZL_GraphID newBaseGraph);
+
+/**
+ * Warning: This is part of experimental API for compressor mutation.
+ *
+ * Requires that:
+ * @p node is a parameterized node registered in @p compressor
+ *
+ * Replaces the parameters of @p node with @p np.
+ * @note: This function does not do any additional work typically associated
+ * with ZL_Compressor_registerParameterizedNode(), including dictionary
+ * unpacking.
+ */
+ZL_Report ZL_Compressor_overrideNodeParams(
+        ZL_Compressor* compressor,
+        ZL_NodeID node,
+        const ZL_NodeParameters* np);
+
+/**
+ * Look up a previously loaded dict by its ZL_DictID.
+ * @param matDesc must match the materializer used when the dict was loaded.
+ * @returns the dict, or NULL if no dict with this ID has been loaded.
+ */
+const ZL_Dict* CGRAPH_findDict(
+        const ZL_Compressor* cgraph,
+        const ZL_DictID* id,
+        const ZL_MaterializerDesc* matDesc);
 
 ZL_END_C_DECLS
 

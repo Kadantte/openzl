@@ -38,7 +38,7 @@
  * state
  * @param rtgm Runtime graph manager, must be reset and initialized for each
  * chunk
- * @param arena Main arena allocator for segmenter context allocation
+ * @param sessionArena Main arena allocator for segmenter context allocation
  * @param chunkArena Dedicated arena for chunk-lifetime allocations during
  * processing
  * @return Initialized segmenter context, or NULL on initialization failure
@@ -52,8 +52,9 @@ ZL_Segmenter* SEGM_init(
         size_t numInputs,
         ZL_CCtx* cctx,
         RTGraph* rtgm,
-        Arena* arena,
-        Arena* chunkArena);
+        Arena* sessionArena,
+        Arena* chunkArena,
+        ZL_GraphID graphid);
 
 /**
  * @brief Execute the segmenter function to process all input data.

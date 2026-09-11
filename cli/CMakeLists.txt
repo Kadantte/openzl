@@ -10,8 +10,7 @@ add_subdirectory(args)
 add_subdirectory(commands)
 add_subdirectory(utils)
 
-if (BUILD_TESTS AND BUILD_PYTHON_EXT)
-    message(STATUS "adding python tests")
+if (OPENZL_BUILD_TESTS)
     add_subdirectory(tests)
 endif()
 
@@ -38,5 +37,9 @@ add_dependencies(zli
     utils
     logger
 )
+
+if(TARGET xgboost_external)
+    add_dependencies(zli xgboost_external)
+endif()
 
 apply_openzl_compile_options_to_target(zli)

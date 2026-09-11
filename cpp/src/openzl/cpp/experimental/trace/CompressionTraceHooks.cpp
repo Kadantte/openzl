@@ -1,30 +1,14 @@
 // Copyright (c) Meta Platforms, Inc. and affiliates.
 #include "openzl/cpp/experimental/trace/CompressionTraceHooks.hpp"
 
-#include "openzl/common/a1cbor_helpers.h"
-#include "openzl/common/logging.h"
-#include "openzl/compress/dyngraph_interface.h"
-#include "openzl/cpp/Exception.hpp"
-#include "openzl/cpp/experimental/trace/Codec.hpp"
-#include "openzl/cpp/experimental/trace/StreamVisualizer.hpp"
 #include "openzl/zl_data.h"
 #include "openzl/zl_errors.h"
-#include "openzl/zl_input.h"
 #include "openzl/zl_opaque_types.h"
-#include "openzl/zl_output.h"
 #include "openzl/zl_reflection.h"
 
-#include <algorithm>
 #include <cstdlib>
-#include <filesystem>
-#include <fstream>
-#include <iomanip>
-#include <iostream>
 #include <map>
-#include <numeric>
-#include <unordered_map>
 #include <utility>
-#include <vector>
 
 namespace openzl::visualizer {
 
@@ -66,6 +50,38 @@ inline std::string graphTypeToStr(ZL_GraphType gtype)
     }
 }
 
+void CompressionTraceHooks::on_segmenterEncode_start(ZL_Segmenter* segCtx)
+{
+    // Trampoline to CompressTracer
+    tracer_->on_segmenterEncode_start(segCtx);
+}
+void CompressionTraceHooks::on_segmenterEncode_end(
+        ZL_Segmenter* segCtx,
+        ZL_Report r)
+{
+    // Trampoline to CompressTracer
+    tracer_->on_segmenterEncode_end(segCtx, r);
+}
+void CompressionTraceHooks::on_ZL_Segmenter_processChunk_start(
+        ZL_Segmenter* segCtx,
+        const size_t numElts[],
+        size_t numInputs,
+        ZL_GraphID startingGraphID,
+        const ZL_RuntimeGraphParameters* rGraphParams)
+{
+    // Trampoline to CompressTracer
+    tracer_->on_ZL_Segmenter_processChunk_start(
+            segCtx, numElts, numInputs, startingGraphID, rGraphParams);
+}
+
+void CompressionTraceHooks::on_ZL_Segmenter_processChunk_end(
+        ZL_Segmenter* segCtx,
+        ZL_Report r)
+{
+    // Trampoline to CompressTracer
+    tracer_->on_ZL_Segmenter_processChunk_end(segCtx, r);
+}
+
 void CompressionTraceHooks::on_codecEncode_start(
         ZL_Encoder* encoder,
         const ZL_Compressor* compressor,
@@ -73,7 +89,7 @@ void CompressionTraceHooks::on_codecEncode_start(
         const ZL_Input* inStreams[],
         size_t nbInStreams)
 {
-    // Trampoline to Tracer
+    // Trampoline to CompressTracer
     tracer_->on_codecEncode_start(
             encoder, compressor, nid, inStreams, nbInStreams);
 }
@@ -84,11 +100,13 @@ void CompressionTraceHooks::on_codecEncode_end(
         size_t nbOutputs,
         ZL_Report codecExecResult)
 {
-    // Trampoline to Tracer
+    // Trampoline to CompressTracer
     tracer_->on_codecEncode_end(eictx, outStreams, nbOutputs, codecExecResult);
 }
 
-void CompressionTraceHooks::on_ZL_Encoder_getScratchSpace(ZL_Encoder*, size_t)
+void CompressionTraceHooks::on_ZL_Encoder_getScratchSpace(
+        ZL_Encoder* /*ei*/,
+        size_t /*size*/)
 {
 }
 
@@ -97,16 +115,16 @@ void CompressionTraceHooks::on_ZL_Encoder_sendCodecHeader(
         const void* trh,
         size_t trhSize)
 {
-    // Trampoline to Tracer
+    // Trampoline to CompressTracer
     tracer_->on_ZL_Encoder_sendCodecHeader(eictx, trh, trhSize);
 }
 
 void CompressionTraceHooks::on_ZL_Encoder_createTypedStream(
-        ZL_Encoder*,
-        int,
-        size_t eltsCapacity,
-        size_t eltWidth,
-        ZL_Output* createdStream)
+        ZL_Encoder* /*encoder*/,
+        int /*outStreamIndex*/,
+        size_t /*eltsCapacity*/,
+        size_t /*eltWidth*/,
+        ZL_Output* /*createdStream*/)
 {
 }
 
@@ -117,7 +135,7 @@ void CompressionTraceHooks::on_migraphEncode_start(
         ZL_Edge* edges[],
         size_t nbEdges)
 {
-    // Trampoline to Tracer
+    // Trampoline to CompressTracer
     tracer_->on_migraphEncode_start(graph, compressor, gid, edges, nbEdges);
 }
 
@@ -127,7 +145,7 @@ void CompressionTraceHooks::on_migraphEncode_end(
         size_t nbSuccessors,
         ZL_Report graphExecResult)
 {
-    // Trampoline to Tracer
+    // Trampoline to CompressTracer
     tracer_->on_migraphEncode_end(
             gctx, ssuccesorGraphs, nbSuccessors, graphExecResult);
 }
@@ -139,24 +157,28 @@ void CompressionTraceHooks::on_cctx_convertOneInput(
         const ZL_Type portTypeMask,
         const ZL_Report conversionResult)
 {
-    // Trampoline to Tracer
+    // Trampoline to CompressTracer
     tracer_->on_cctx_convertOneInput(
             cctx, input, inType, portTypeMask, conversionResult);
 }
 
-void CompressionTraceHooks::on_ZL_Graph_getScratchSpace(ZL_Graph*, size_t) {}
+void CompressionTraceHooks::on_ZL_Graph_getScratchSpace(
+        ZL_Graph* /*graph*/,
+        size_t /*size*/)
+{
+}
 
 void CompressionTraceHooks::on_ZL_Edge_setMultiInputDestination_wParams(
-        ZL_Graph*,
-        ZL_Edge*[],
-        size_t,
-        ZL_GraphID,
-        const ZL_LocalParams*)
+        ZL_Graph* /*graph*/,
+        ZL_Edge*[] /*inputs*/,
+        size_t /*nbInputs*/,
+        ZL_GraphID /*gid*/,
+        const ZL_LocalParams* /*lparams*/)
 {
 }
 
 void CompressionTraceHooks::on_ZL_CCtx_compressMultiTypedRef_start(
-        ZL_CCtx const* const cctx,
+        ZL_CCtx* cctx,
         void const* const dst,
         size_t const dstCapacity,
         ZL_TypedRef const* const inputs[],
@@ -165,14 +187,13 @@ void CompressionTraceHooks::on_ZL_CCtx_compressMultiTypedRef_start(
     // Reset the output stream
     outStream_.str("");
     outStream_.clear();
-    latestStreamdumpCache_ =
-            std::map<size_t, std::pair<std::string, std::string>>();
+    latestStreamdumpCache_ = {};
 
     if (tracer_) {
         throw std::runtime_error(
                 "Corrupted state. Trace context already exists!");
     }
-    tracer_ = std::make_unique<Tracer>(cctx);
+    tracer_ = std::make_unique<CompressTracer>(showStreamPreview_);
     tracer_->on_ZL_CCtx_compressMultiTypedRef_start(
             cctx, dst, dstCapacity, inputs, nbInputs);
 }
@@ -191,15 +212,21 @@ void CompressionTraceHooks::on_ZL_CCtx_compressMultiTypedRef_end(
 
 std::pair<
         poly::string_view,
-        std::map<size_t, std::pair<poly::string_view, poly::string_view>>>
+        std::map<std::string, std::pair<poly::string_view, poly::string_view>>>
 CompressionTraceHooks::getLatestTrace()
 {
-    std::map<size_t, std::pair<poly::string_view, poly::string_view>>
+    std::map<std::string, std::pair<poly::string_view, poly::string_view>>
             streamdumps;
-    for (auto& [k, v] : latestStreamdumpCache_) {
-        streamdumps[k] = { poly::string_view(v.first),
-                           poly::string_view(v.second) };
+    for (size_t chunkId = 0; chunkId < latestStreamdumpCache_.size();
+         chunkId++) {
+        for (const auto& streamdump : latestStreamdumpCache_[chunkId]) {
+            std::string key = "chunk_" + std::to_string(chunkId) + "_stream_"
+                    + std::to_string(streamdump.streamId);
+            streamdumps[key] = { poly::string_view(streamdump.content),
+                                 poly::string_view(streamdump.strLens) };
+        }
     }
+
     return { latestTraceCache_, std::move(streamdumps) };
 }
 

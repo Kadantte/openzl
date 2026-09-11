@@ -11,6 +11,7 @@
 #include "openzl/zl_errors.h"   // ZL_Report
 #include "openzl/zl_input.h"
 #include "openzl/zl_localParams.h"  // ZL_LocalParams
+#include "openzl/zl_materializer.h" // ZL_MaterializerDesc
 #include "openzl/zl_opaque_types.h" // ZL_GraphID
 #include "openzl/zl_portability.h"  // ZL_NOEXCEPT_FUNC_PTR
 
@@ -45,8 +46,6 @@ extern "C" {
  * Note: Function Graph is (currently) the only way to deal with multiple
  * Inputs.
  */
-typedef struct ZL_Graph_s ZL_Graph;
-typedef struct ZL_Edge_s ZL_Edge;
 typedef struct ZL_FunctionGraphDesc ZL_FunctionGraphDesc;
 /**
  * The function signature for function graphs.
@@ -94,6 +93,21 @@ struct ZL_FunctionGraphDesc {
      * registration fails, and it lives for the lifetime of the compressor.
      */
     ZL_OpaquePtr opaque;
+    /**
+     * Optional materializer for compression-only materialized parameters
+     * (MParams). If materializeFn is non-null, it will be called during
+     * compressor deserialization to create the materialized object from
+     * the serialized MParam blob. Unlike dicts, MParams are NOT required
+     * at decompression time.
+     */
+    ZL_MaterializerDesc mparamMat;
+    /**
+     * Optional MParam associated with this graph. The provided content blob
+     * will be materialized as dictated by @p mparamMat . OpenZL will not take
+     * ownership of the content provided. The caller is free to free the buffer
+     * anytime after registering the graph.
+     */
+    ZL_MParam mparam;
 };
 
 /**
@@ -141,6 +155,19 @@ int ZL_Graph_getCParam(const ZL_Graph* gctx, ZL_CParam gparam);
 /* Consultation requests for Local parameters */
 ZL_IntParam ZL_Graph_getLocalIntParam(const ZL_Graph* gctx, int intParamId);
 ZL_RefParam ZL_Graph_getLocalRefParam(const ZL_Graph* gctx, int refParamId);
+/**
+ * Bulk consultation request of *all* Local Parameters. This can be useful when
+ * one is trying to access all the Local Parameters at once for a codec using
+ * the encoder.
+ */
+const ZL_LocalParams* ZL_Graph_getLocalParams(const ZL_Graph* gctx);
+
+/**
+ * @returns The materialized MParam object associated with this graph, if
+ * there is one. Otherwise NULL. MParams are compression-only resources
+ * that are not required at decompression time.
+ */
+const void* ZL_Graph_getMParam(const ZL_Graph* gctx);
 
 /**
  * Determines whether @nodeid is supported given the applied global parameters
@@ -152,13 +179,48 @@ bool ZL_Graph_isNodeSupported(const ZL_Graph* gctx, ZL_NodeID nodeid);
 
 const void* ZL_Graph_getOpaquePtr(const ZL_Graph* graph);
 
+/**
+ * @brief Query the current graph execution depth.
+ *
+ * Returns the depth at which the current graph is executing.
+ * Depth 1 is the root graph; each successor level increments by 1.
+ * This can be used to detect runaway graph growth.
+ *
+ * @param gctx  Graph context, must be non-NULL.
+ * @return Current graph execution depth (>= 1).
+ */
+unsigned ZL_Graph_getDepth(const ZL_Graph* gctx);
+
 /* access the content of an Edge */
 const ZL_Input* ZL_Edge_getData(const ZL_Edge* sctx);
 
+/**
+ * Gets the error context for a given ZL_Report. This context is useful for
+ * debugging and for submitting bug reports to Zstrong developers.
+ *
+ * @param report The report to get the error context for
+ *
+ * @returns A verbose error string containing context about the error that
+ * occurred.
+ *
+ * @note: This string is stored within the @p graph and may only be valid for
+ * the lifetime of the @p graph.
+ */
+const char* ZL_Graph_getErrorContextString(
+        const ZL_Graph* graph,
+        ZL_Report report);
+
+/**
+ * See ZL_Graph_getErrorContextString()
+ *
+ * @param error: The error to get the context for
+ */
+const char* ZL_Graph_getErrorContextString_fromError(
+        const ZL_Graph* graph,
+        ZL_Error error);
+
 /* Actions */
 /* ------- */
-
-typedef struct ZL_GraphParameters_s ZL_RuntimeGraphParameters;
 
 /* Scratch space allocation:
  * When the function graph function needs some temporary space for some
